@@ -12,13 +12,10 @@ class TelaFornecedores extends StatefulWidget {
 }
 
 class _TelaFornecedoresState extends State<TelaFornecedores> {
-  // Controles de Busca e Filtros
   String _termoBusca = '';
   String? _filtroClasse;
   String? _filtroSubclasse;
-  String _filtroStatus = 'Ativos'; // Pode ser 'Ativos', 'Inativos' ou 'Todos'
-
-  // Gatilho para mostrar todos os registros (quebra o ecrã limpo)
+  String _filtroStatus = 'Ativos';
   bool _mostrarTodos = false;
 
   List<DocumentSnapshot> _categorias = [];
@@ -72,7 +69,6 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
     }
   }
 
-  // Função que limpa totalmente a tela e reseta os filtros
   void _limparTela() {
     setState(() {
       _termoBusca = '';
@@ -83,9 +79,37 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
     });
   }
 
+  // --- MAGIA 1: Corta os parênteses para o nome caber no botão quadrado ---
+  String _formatarNomeCurto(String nomeCompleto) {
+    int indexParenteses = nomeCompleto.indexOf('(');
+    if (indexParenteses != -1) {
+      return nomeCompleto.substring(0, indexParenteses).trim();
+    }
+    return nomeCompleto;
+  }
+
+  // --- MAGIA 2: Ícones automáticos baseados no nome da categoria ---
+  IconData _getIconeParaCategoria(String nome) {
+    final n = nome.toLowerCase();
+    if (n.contains('ativo') || n.contains('investimento'))
+      return Icons.account_balance;
+    if (n.contains('consumo')) return Icons.precision_manufacturing;
+    if (n.contains('administrativa')) return Icons.folder_open;
+    if (n.contains('fixas') || n.contains('ocupação'))
+      return Icons.receipt_long;
+    if (n.contains('insumos') || n.contains('produção'))
+      return Icons.inventory_2;
+    if (n.contains('infraestrutura') || n.contains('manutenção'))
+      return Icons.handyman;
+    if (n.contains('rh') || n.contains('segurança'))
+      return Icons.health_and_safety;
+    if (n.contains('serviços') || n.contains('terceirizados'))
+      return Icons.handshake;
+    return Icons.category; // Ícone padrão genérico
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Verifica se a tela deve ficar no modo "Limpo" (Nenhum filtro ou busca ativa)
     bool telaLimpa =
         _termoBusca.isEmpty && _filtroClasse == null && !_mostrarTodos;
 
@@ -103,6 +127,7 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
     }
 
     return Scaffold(
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         backgroundColor: Colors.white,
         foregroundColor: Colors.blueGrey,
@@ -139,15 +164,14 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
                     : null,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
                 ),
                 filled: true,
-                fillColor: Colors.grey[100],
+                fillColor: Colors.grey.shade200,
                 contentPadding: const EdgeInsets.symmetric(vertical: 0),
               ),
               onChanged: (valor) =>
                   setState(() => _termoBusca = valor.toLowerCase()),
-              // Se tiver um controlador, seria bom limpar o campo visualmente no _limparTela,
-              // mas como estamos só a alterar o estado, o usuário pode apagar o texto à mão.
             ),
           ),
         ),
@@ -155,90 +179,141 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // --- LINHA 1: FILTROS DE CLASSES ---
+          // --- LINHA 1: BOTÕES QUADRADOS (GRID RESPONSIVO) ---
           if (_categorias.isNotEmpty)
             Container(
               color: Colors.white,
               width: double.infinity,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: _categorias.map((doc) {
-                    String nome = doc['nome'].toString();
-                    bool selecionado = _filtroClasse == nome;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(nome),
-                        selected: selecionado,
-                        onSelected: (sel) {
-                          setState(() {
-                            _filtroClasse = sel ? nome : null;
-                            _filtroSubclasse = null;
-                            _mostrarTodos =
-                                false; // Se clicou na classe, já não é "Mostrar Todos", é busca filtrada
-                          });
-                        },
-                        selectedColor: Colors.blueGrey,
-                        labelStyle: TextStyle(
-                          color: selecionado ? Colors.white : Colors.black87,
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+              child: Wrap(
+                spacing: 8.0,
+                runSpacing: 8.0,
+                alignment: WrapAlignment.center, // Centraliza os quadradinhos
+                children: _categorias.map((doc) {
+                  String nomeCompleto = doc['nome'].toString();
+                  bool selecionado = _filtroClasse == nomeCompleto;
+
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _filtroClasse = selecionado
+                            ? null
+                            : nomeCompleto; // Clicar de novo desmarca
+                        _filtroSubclasse = null;
+                        _mostrarTodos = false;
+                      });
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width:
+                          82, // Largura exata para caberem 4 botões num telemóvel padrão (fechando 2 linhas perfeitas)
+                      height: 82,
+                      decoration: BoxDecoration(
+                        color: selecionado ? Colors.blueGrey : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: selecionado
+                              ? Colors.blueGrey
+                              : Colors.grey.shade300,
                         ),
+                        boxShadow: selecionado
+                            ? [
+                                BoxShadow(
+                                  color: Colors.blueGrey.withOpacity(0.4),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ]
+                            : [],
                       ),
-                    );
-                  }).toList(),
-                ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _getIconeParaCategoria(nomeCompleto),
+                            color: selecionado
+                                ? Colors.white
+                                : Colors.blueGrey.shade400,
+                            size: 26,
+                          ),
+                          const SizedBox(height: 6),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 2.0,
+                            ),
+                            child: Text(
+                              _formatarNomeCurto(nomeCompleto),
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10,
+                                height:
+                                    1.1, // Reduz o espaço entre as linhas do texto
+                                color: selecionado
+                                    ? Colors.white
+                                    : Colors.black87,
+                                fontWeight: selecionado
+                                    ? FontWeight.bold
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
 
-          // --- LINHA 2: FILTROS DE SUBCLASSES ---
+          // --- LINHA 2: FILTROS DE SUBCLASSES (MANTIDOS COMO "PÍLULAS" PARA NÃO POLUIR) ---
           if (_filtroClasse != null && subclassesAtuais.isNotEmpty)
             Container(
               color: Colors.blueGrey.shade50,
               width: double.infinity,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.subdirectory_arrow_right,
-                      color: Colors.blueGrey,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    ...subclassesAtuais.map((subNome) {
-                      bool selecionado = _filtroSubclasse == subNome;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(subNome),
-                          selected: selecionado,
-                          onSelected: (sel) {
-                            setState(
-                              () => _filtroSubclasse = sel ? subNome : null,
-                            );
-                          },
-                          selectedColor: Colors.teal,
-                          labelStyle: TextStyle(
-                            color: selecionado ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      );
-                    }),
-                  ],
-                ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Wrap(
+                spacing: 6.0,
+                runSpacing: 4.0,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.subdirectory_arrow_right,
+                    color: Colors.blueGrey,
+                    size: 18,
+                  ),
+                  ...subclassesAtuais.map((subNome) {
+                    bool selecionado = _filtroSubclasse == subNome;
+                    return ChoiceChip(
+                      label: Text(subNome),
+                      selected: selecionado,
+                      onSelected: (sel) {
+                        setState(() => _filtroSubclasse = sel ? subNome : null);
+                      },
+                      selectedColor: Colors.teal,
+                      backgroundColor: Colors.white,
+                      labelStyle: TextStyle(
+                        color: selecionado ? Colors.white : Colors.black87,
+                        fontSize: 12,
+                        fontWeight: selecionado
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 0,
+                      ),
+                    );
+                  }),
+                ],
               ),
             ),
 
           // --- LINHA 3: STATUS (ATIVOS/INATIVOS) E LIMPAR ---
-          // Só mostra esta barra se não estiver no ecrã limpo
           if (!telaLimpa)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -248,16 +323,16 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
                   Row(
                     children: [
                       _chipStatus('Ativos', Colors.green),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       _chipStatus('Inativos', Colors.red),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       _chipStatus('Todos', Colors.blueGrey),
                     ],
                   ),
                   TextButton.icon(
                     onPressed: _limparTela,
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Limpar'),
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text('Limpar', style: TextStyle(fontSize: 12)),
                   ),
                 ],
               ),
@@ -283,7 +358,6 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
     );
   }
 
-  // COMPONENTE: Ecrã Limpo Inicial
   Widget _construirEcraLimpo() {
     return Center(
       child: SingleChildScrollView(
@@ -297,7 +371,7 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
             ),
             const SizedBox(height: 16),
             const Text(
-              'Consulta de Fornecedores',
+              'Consulta Rápida',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -306,7 +380,7 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Digite um nome ou escolha uma classe acima\npara iniciar a sua busca.',
+              'Toque numa categoria acima\nou faça uma busca.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey),
             ),
@@ -330,7 +404,6 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
     );
   }
 
-  // COMPONENTE: Chip de Status
   Widget _chipStatus(String rotulo, Color corFundo) {
     bool selecionado = _filtroStatus == rotulo;
     return ChoiceChip(
@@ -340,17 +413,20 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
         if (sel) setState(() => _filtroStatus = rotulo);
       },
       selectedColor: corFundo.withOpacity(0.2),
+      backgroundColor: Colors.transparent,
       labelStyle: TextStyle(
         color: selecionado
             ? corFundo.withRed(corFundo.red ~/ 1.5)
-            : Colors.black54, // Escurece um pouco a cor do texto
+            : Colors.black54,
+        fontSize: 11,
         fontWeight: selecionado ? FontWeight.bold : FontWeight.normal,
       ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       side: BorderSide(color: selecionado ? corFundo : Colors.grey.shade300),
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
     );
   }
 
-  // COMPONENTE: A Lista Filtrada do Firebase
   Widget _construirListaFornecedores() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -374,11 +450,9 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
           final subclasseFornecedor = (data['subcategoria'] ?? '').toString();
           final ativo = data['ativo'] ?? true;
 
-          // REGRA 1: Filtro de Status (Ativo/Inativo/Todos)
           if (_filtroStatus == 'Ativos' && !ativo) return false;
           if (_filtroStatus == 'Inativos' && ativo) return false;
 
-          // REGRA 2: Busca por Texto
           bool matchTexto =
               _termoBusca.isEmpty ||
               nome.contains(_termoBusca) ||
@@ -387,7 +461,6 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
               classeFornecedor.toLowerCase().contains(_termoBusca) ||
               subclasseFornecedor.toLowerCase().contains(_termoBusca);
 
-          // REGRA 3: Filtro de Classes e Subclasses
           bool matchClasse =
               _filtroClasse == null || classeFornecedor == _filtroClasse;
           bool matchSubclasse =
@@ -400,7 +473,7 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
         if (documentos.isEmpty) {
           return const Center(
             child: Text(
-              'Nenhum resultado encontrado para estes filtros.',
+              'Nenhum resultado encontrado.',
               style: TextStyle(fontSize: 16, color: Colors.blueGrey),
             ),
           );
@@ -420,9 +493,7 @@ class _TelaFornecedoresState extends State<TelaFornecedores> {
             return Card(
               elevation: 2,
               margin: const EdgeInsets.only(bottom: 10),
-              color: ativo
-                  ? Colors.white
-                  : Colors.grey.shade100, // Escurece o card se for Inativo
+              color: ativo ? Colors.white : Colors.grey.shade100,
               child: ListTile(
                 leading: CircleAvatar(
                   backgroundColor: ativo

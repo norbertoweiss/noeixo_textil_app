@@ -5,6 +5,7 @@ import '../../models/cor_model.dart';
 import 'form_grade.dart';
 import 'form_cor.dart';
 import 'form_tecido.dart';
+import 'form_unidade_medida.dart'; // AQUI ESTÁ A NOVA IMPORTAÇÃO
 
 class TelaCadastrosBase extends StatefulWidget {
   const TelaCadastrosBase({super.key});
@@ -20,11 +21,13 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
   String _filtroGrades = 'Todos';
   String _filtroCores = 'Todos';
   String _filtroTecidos = 'Todos';
+  String _filtroUnidades = 'Todos'; // NOVO FILTRO PARA AS UNIDADES
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    // ATUALIZADO: De 3 para 4 abas
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       setState(() {});
     });
@@ -66,16 +69,24 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
           labelColor: Colors.blueGrey,
           unselectedLabelColor: Colors.grey,
           indicatorColor: Colors.blueGrey,
+          isScrollable:
+              true, // IMPORTANTE: Permite deslizar as abas em telas pequenas
           tabs: const [
             Tab(text: 'Grades'),
             Tab(text: 'Cores'),
             Tab(text: 'Tecidos'),
+            Tab(text: 'Unidades'), // NOVA ABA
           ],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [_buildAbaGrades(), _buildAbaCores(), _buildAbaTecidos()],
+        children: [
+          _buildAbaGrades(),
+          _buildAbaCores(),
+          _buildAbaTecidos(),
+          _buildAbaUnidades(), // NOVA VISTA
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.blueGrey,
@@ -91,6 +102,14 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
             Navigator.push(
               context,
               MaterialPageRoute(builder: (context) => const FormTecido()),
+            );
+          } else if (_tabController.index == 3) {
+            // NAVEGAÇÃO PARA O NOVO FORMULÁRIO DE UNIDADES
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const FormUnidadeMedida(),
+              ),
             );
           }
         },
@@ -116,15 +135,17 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
                 .where('clienteId', isEqualTo: 'teste_textil')
                 .snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting)
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+              }
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                 return const Center(
                   child: Text(
                     'Nenhuma grade cadastrada.',
                     style: TextStyle(color: Colors.grey),
                   ),
                 );
+              }
 
               var documentos = snapshot.data!.docs.where((doc) {
                 bool ativo = doc['ativo'] ?? true;
@@ -198,15 +219,17 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
                 .where('clienteId', isEqualTo: 'teste_textil')
                 .snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting)
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+              }
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                 return const Center(
                   child: Text(
                     'Nenhuma cor cadastrada.',
                     style: TextStyle(color: Colors.grey),
                   ),
                 );
+              }
 
               var documentos = snapshot.data!.docs.where((doc) {
                 bool ativo = doc['ativo'] ?? true;
@@ -303,15 +326,17 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
                 .where('clienteId', isEqualTo: 'teste_textil')
                 .snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting)
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+              }
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                 return const Center(
                   child: Text(
                     'Nenhum tecido cadastrado.',
                     style: TextStyle(color: Colors.grey),
                   ),
                 );
+              }
 
               var documentos = snapshot.data!.docs.where((doc) {
                 bool ativo = doc['ativo'] ?? true;
@@ -358,6 +383,116 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
                         activeColor: Colors.blueGrey,
                         onChanged: (valor) =>
                             _alterarStatus('tecidos', id, valor),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ==========================================
+  // ABA 4 (NOVA): UNIDADES DE MEDIDA
+  // ==========================================
+  Widget _buildAbaUnidades() {
+    return Column(
+      children: [
+        _construirFiltro(
+          valorAtual: _filtroUnidades,
+          aoMudar: (novo) => setState(() => _filtroUnidades = novo),
+        ),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('unidades_medida')
+                .where('clienteId', isEqualTo: 'teste_textil')
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                return const Center(
+                  child: Text(
+                    'Nenhuma unidade cadastrada.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                );
+              }
+
+              var documentos = snapshot.data!.docs.where((doc) {
+                bool ativo = doc['ativo'] ?? true;
+                if (_filtroUnidades == 'Ativos') return ativo;
+                if (_filtroUnidades == 'Inativos') return !ativo;
+                return true;
+              }).toList();
+
+              return ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: documentos.length,
+                itemBuilder: (context, index) {
+                  final data = documentos[index].data() as Map<String, dynamic>;
+                  final id = documentos[index].id;
+                  final ativo = data['ativo'] ?? true;
+
+                  return Card(
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: ativo
+                            ? Colors.blueGrey[100]
+                            : Colors.grey[200],
+                        child: Text(
+                          (data['sigla'] ?? '').toString().toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: ativo ? Colors.blueGrey : Colors.grey,
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        data['nome'] ?? '',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          decoration: ativo
+                              ? TextDecoration.none
+                              : TextDecoration.lineThrough,
+                          color: ativo ? Colors.black87 : Colors.grey,
+                        ),
+                      ),
+                      trailing: Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 10,
+                        children: [
+                          IconButton(
+                            icon: const Icon(
+                              Icons.edit,
+                              color: Colors.blueGrey,
+                              size: 20,
+                            ),
+                            onPressed: () {
+                              // NAVEGAÇÃO PARA O FORMULÁRIO DE UNIDADE NO MODO EDIÇÃO
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => FormUnidadeMedida(
+                                    unidadeParaEditar: documentos[index],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          Switch(
+                            value: ativo,
+                            activeColor: Colors.blueGrey,
+                            onChanged: (valor) =>
+                                _alterarStatus('unidades_medida', id, valor),
+                          ),
+                        ],
                       ),
                     ),
                   );

@@ -4,7 +4,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 import 'screens/cadastros_base/tela_cadastros_base.dart';
 import 'screens/fornecedores/tela_fornecedores.dart';
-import 'screens/fornecedores/tela_categorias_fornecedor.dart';
+import 'screens/insumos/tela_abas_suprimentos.dart';
+
+// NOVAS IMPORTAÇÕES DO ESTOQUE
+import 'screens/estoque/tela_entrada_conferencia.dart';
+import 'screens/estoque/tela_estoque_materia_prima.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -114,7 +118,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             const Padding(
               padding: EdgeInsets.all(16.0),
               child: Text(
-                'v 1.6.6',
+                'v 1.6.7',
                 style: TextStyle(color: Colors.grey, fontSize: 12),
               ),
             ),
@@ -206,34 +210,34 @@ class TelaSuprimentosMenu extends StatelessWidget {
       crossAxisSpacing: 15,
       mainAxisSpacing: 15,
       children: [
-        // AGORA SIM: Sem o 'const' antes de TelaFornecedores() e TelaCategoriasFornecedor()
         _botaoMenuResponsivo(
           context,
           'Fornecedores',
           Icons.business,
           Colors.blueGrey,
-          TelaFornecedores(),
+          const TelaFornecedores(),
         ),
         _botaoMenuResponsivo(
           context,
           'Categorias & Insumos',
           Icons.account_tree,
           Colors.indigo,
-          TelaCategoriasFornecedor(),
+          const TelaAbasSuprimentos(),
         ),
+        // BOTÕES LIGADOS CORRETAMENTE ÀS NOVAS TELAS
         _botaoMenuResponsivo(
           context,
           'Entrada / Conferência',
           Icons.assignment_returned,
           Colors.teal,
-          const Center(child: Text('Conferência de Largura e Gramatura')),
+          const TelaEntradaConferencia(),
         ),
         _botaoMenuResponsivo(
           context,
           'Estoque Matéria-Prima',
           Icons.inventory,
           Colors.brown,
-          const Center(child: Text('Saldos e Lotes')),
+          const TelaEstoqueMateriaPrima(),
         ),
       ],
     );
@@ -254,13 +258,12 @@ class TelaEngenhariaMenu extends StatelessWidget {
       crossAxisSpacing: 15,
       mainAxisSpacing: 15,
       children: [
-        // AGORA SIM: Sem o 'const' antes de TelaCadastrosBase()
         _botaoMenuResponsivo(
           context,
           'Cadastros Base',
           Icons.inventory_2,
           Colors.blueGrey,
-          TelaCadastrosBase(),
+          const TelaCadastrosBase(),
         ),
         _botaoMenuResponsivo(
           context,

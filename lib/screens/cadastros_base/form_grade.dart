@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // NOVO: Motor do banco de dados
-import '../../models/grade_model.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FormGrade extends StatefulWidget {
   const FormGrade({super.key});
@@ -15,7 +14,7 @@ class _FormGradeState extends State<FormGrade> {
   final TextEditingController _tamanhoController = TextEditingController();
 
   List<String> _tamanhos = [];
-  bool _salvando = false; // NOVO: Controle da rodinha de carregamento
+  bool _salvando = false;
 
   void _adicionarTamanho() {
     if (_tamanhoController.text.isNotEmpty) {
@@ -31,8 +30,9 @@ class _FormGradeState extends State<FormGrade> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Nova Grade de Tamanhos'),
-        backgroundColor: Colors.blueGrey,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white, // Ajustado para o padrão visual do app
+        foregroundColor: Colors.blueGrey,
+        elevation: 1,
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -46,10 +46,11 @@ class _FormGradeState extends State<FormGrade> {
                 decoration: const InputDecoration(
                   labelText: 'Nome da Grade (ex: Adulto Masculino)',
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.label),
+                  prefixIcon: Icon(Icons.label_outline),
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) return 'Informe o nome';
+                  if (value == null || value.trim().isEmpty)
+                    return 'Informe o nome';
                   return null;
                 },
               ),
@@ -61,29 +62,33 @@ class _FormGradeState extends State<FormGrade> {
                     child: TextFormField(
                       controller: _tamanhoController,
                       decoration: const InputDecoration(
-                        labelText: 'Adicionar Tamanho (ex: P)',
+                        labelText: 'Adicionar Tamanho (ex: P, M, G, 42)',
                         border: OutlineInputBorder(),
                       ),
                       onFieldSubmitted: (_) => _adicionarTamanho(),
                     ),
                   ),
                   const SizedBox(width: 10),
-                  IconButton.filled(
-                    onPressed: _adicionarTamanho,
-                    icon: const Icon(Icons.add),
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.blueGrey,
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.blueGrey,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: IconButton(
+                      onPressed: _adicionarTamanho,
+                      icon: const Icon(Icons.add, color: Colors.white),
+                      tooltip: 'Adicionar à grade',
                     ),
                   ),
                 ],
               ),
 
-              const SizedBox(height: 10),
+              const SizedBox(height: 15),
               const Text(
-                'Tamanhos adicionados (clique para remover):',
+                'Tamanhos adicionados (toque para remover):',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: Colors.grey,
+                  color: Colors.blueGrey,
                 ),
               ),
 
@@ -93,13 +98,21 @@ class _FormGradeState extends State<FormGrade> {
                 children: _tamanhos
                     .map(
                       (tam) => ActionChip(
-                        label: Text(tam),
+                        label: Text(
+                          tam,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        backgroundColor: Colors.blueGrey.shade50,
                         onPressed: () {
                           setState(() {
                             _tamanhos.remove(tam);
                           });
                         },
-                        avatar: const Icon(Icons.close, size: 14),
+                        avatar: const Icon(
+                          Icons.close,
+                          size: 16,
+                          color: Colors.blueGrey,
+                        ),
                       ),
                     )
                     .toList(),
@@ -109,49 +122,31 @@ class _FormGradeState extends State<FormGrade> {
 
               SizedBox(
                 width: double.infinity,
-                height: 50,
                 child: ElevatedButton(
                   onPressed: _salvando
                       ? null
                       : () async {
                           if (_formKey.currentState!.validate() &&
                               _tamanhos.isNotEmpty) {
-                            setState(() {
-                              _salvando = true;
-                            });
+                            setState(() => _salvando = true);
 
                             try {
-                              final db = FirebaseFirestore.instance;
-                              String idFinal = db.collection('grades').doc().id;
-
-                              // GRAVA NA NUVEM FIREBASE
-                              await db.collection('grades').doc(idFinal).set({
-                                'id': idFinal,
-                                'clienteId': 'teste_textil',
-                                'nome': _nomeController.text,
-                                'tamanhos': _tamanhos,
-                                'ativo': true,
-                              });
-
-                              // Prepara o retorno para a lista local
-                              final novaGrade = GradeModel(
-                                id: idFinal,
-                                clienteId: 'teste_textil',
-                                nome: _nomeController.text,
-                                tamanhos: _tamanhos,
-                                ativo: true,
-                              );
+                              // GRAVA NA NUVEM FIREBASE (Sem devoluções locais)
+                              await FirebaseFirestore.instance
+                                  .collection('grades')
+                                  .add({
+                                    'clienteId': 'teste_textil',
+                                    'nome': _nomeController.text.trim(),
+                                    'tamanhos': _tamanhos,
+                                    'ativo': true,
+                                    'dataCadastro':
+                                        FieldValue.serverTimestamp(),
+                                  });
 
                               if (mounted) {
-                                Navigator.pop(context, novaGrade);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Grade salva na nuvem com sucesso!',
-                                    ),
-                                    backgroundColor: Colors.green,
-                                  ),
-                                );
+                                Navigator.pop(
+                                  context,
+                                ); // Apenas fecha a tela! O StreamBuilder na tela base faz o resto.
                               }
                             } catch (e) {
                               if (mounted) {
@@ -163,16 +158,14 @@ class _FormGradeState extends State<FormGrade> {
                                 );
                               }
                             } finally {
-                              if (mounted) {
-                                setState(() {
-                                  _salvando = false;
-                                });
-                              }
+                              if (mounted) setState(() => _salvando = false);
                             }
                           } else if (_tamanhos.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                content: Text('Adicione pelo menos um tamanho'),
+                                content: Text(
+                                  'Adicione pelo menos um tamanho!',
+                                ),
                                 backgroundColor: Colors.red,
                               ),
                             );
@@ -180,25 +173,28 @@ class _FormGradeState extends State<FormGrade> {
                         },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blueGrey,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 18),
                   ),
                   child: _salvando
                       ? const SizedBox(
-                          height: 24,
-                          width: 24,
+                          height: 20,
+                          width: 20,
                           child: CircularProgressIndicator(
                             color: Colors.white,
                             strokeWidth: 2,
                           ),
                         )
                       : const Text(
-                          'GUARDAR GRADE',
+                          'CONFIRMAR GRADE',
                           style: TextStyle(
-                            color: Colors.white,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                 ),
               ),
+              const SizedBox(height: 20),
             ],
           ),
         ),
