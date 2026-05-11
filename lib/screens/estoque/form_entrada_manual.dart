@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'form_entrada_itens.dart'; // NOVO IMPORT
+import 'form_entrada_itens.dart';
+import '../fornecedores/form_fornecedor.dart'; // NOVO IMPORT: Para chamar o cadastro de fornecedor
 
 class FormEntradaManual extends StatefulWidget {
   const FormEntradaManual({super.key});
@@ -43,9 +44,20 @@ class _FormEntradaManualState extends State<FormEntradaManual> {
     }
   }
 
+  String _obterNomeFornecedor(Map<String, dynamic> data) {
+    if (data.containsKey('nomeFantasia') &&
+        data['nomeFantasia'].toString().trim().isNotEmpty)
+      return data['nomeFantasia'];
+    if (data.containsKey('razaoSocial') &&
+        data['razaoSocial'].toString().trim().isNotEmpty)
+      return data['razaoSocial'];
+    if (data.containsKey('nome') && data['nome'].toString().trim().isNotEmpty)
+      return data['nome'];
+    return 'Fornecedor sem nome';
+  }
+
   void _avancarParaItens() {
     if (_formKey.currentState!.validate()) {
-      // Avança passando os dados da Capa para o próximo ecrã
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -120,30 +132,90 @@ class _FormEntradaManualState extends State<FormEntradaManual> {
                     ),
                     const SizedBox(height: 16),
 
-                    DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(
-                        labelText: 'Fornecedor / Origem',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.business),
-                      ),
-                      value: _fornecedorSelecionado,
-                      isExpanded: true,
-                      items: _fornecedores.map((doc) {
-                        String nome =
-                            doc.data().toString().contains('razaoSocial')
-                            ? doc['razaoSocial']
-                            : 'Fornecedor sem nome';
-                        return DropdownMenuItem(
-                          value: doc.id,
-                          child: Text(nome),
-                        );
-                      }).toList(),
-                      onChanged: (v) =>
-                          setState(() => _fornecedorSelecionado = v),
-                      validator: (v) =>
-                          v == null && _tipoDocumento != 'Ajuste Interno'
-                          ? 'Selecione um fornecedor'
-                          : null,
+                    // A MÁGICA ACONTECE AQUI: O Autocomplete e o botão "+" lado a lado
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Autocomplete<DocumentSnapshot>(
+                            displayStringForOption: (doc) =>
+                                _obterNomeFornecedor(
+                                  doc.data() as Map<String, dynamic>,
+                                ),
+                            optionsBuilder: (TextEditingValue textValue) {
+                              if (textValue.text.isEmpty) {
+                                return _fornecedores;
+                              }
+                              return _fornecedores.where((doc) {
+                                final nome = _obterNomeFornecedor(
+                                  doc.data() as Map<String, dynamic>,
+                                ).toLowerCase();
+                                return nome.contains(
+                                  textValue.text.toLowerCase(),
+                                );
+                              });
+                            },
+                            onSelected: (DocumentSnapshot selection) {
+                              setState(() {
+                                _fornecedorSelecionado = selection.id;
+                              });
+                            },
+                            fieldViewBuilder:
+                                (
+                                  context,
+                                  controller,
+                                  focusNode,
+                                  onFieldSubmitted,
+                                ) {
+                                  return TextFormField(
+                                    controller: controller,
+                                    focusNode: focusNode,
+                                    decoration: const InputDecoration(
+                                      labelText:
+                                          'Fornecedor / Origem (Digite para buscar)',
+                                      border: OutlineInputBorder(),
+                                      prefixIcon: Icon(Icons.search),
+                                      hintText: 'Comece a escrever o nome...',
+                                    ),
+                                    validator: (v) {
+                                      if (_tipoDocumento == 'Ajuste Interno')
+                                        return null;
+                                      if (_fornecedorSelecionado == null)
+                                        return 'Selecione um fornecedor da lista';
+                                      return null;
+                                    },
+                                    onChanged: (v) {
+                                      if (v.isEmpty)
+                                        setState(
+                                          () => _fornecedorSelecionado = null,
+                                        );
+                                    },
+                                  );
+                                },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.teal,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: IconButton(
+                            icon: const Icon(Icons.add, color: Colors.white),
+                            tooltip: 'Cadastrar Novo Fornecedor',
+                            onPressed: () async {
+                              // 1. Vai para a tela de Fornecedor
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const FormFornecedor(),
+                                ),
+                              );
+                              // 2. Quando voltar, recarrega a lista do Firebase!
+                              _carregarFornecedores();
+                            },
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 30),
 

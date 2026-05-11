@@ -6,12 +6,14 @@ class FormEntradaItens extends StatefulWidget {
   final String tipoDocumento;
   final String numeroDocumento;
   final String fornecedorId;
+  final String? documentoId;
 
   const FormEntradaItens({
     super.key,
     required this.tipoDocumento,
     required this.numeroDocumento,
     required this.fornecedorId,
+    this.documentoId,
   });
 
   @override
@@ -27,7 +29,6 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
   String? _insumoSelecionado;
   String _nomeInsumoSelecionado = '';
 
-  // Controladores e Focos para cálculo bidirecional
   final _qtdeController = TextEditingController();
   final _unitarioController = TextEditingController();
   final _totalController = TextEditingController();
@@ -37,18 +38,66 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
   final FocusNode _totalFocus = FocusNode();
 
   List<DocumentSnapshot> _insumos = [];
+  List<DocumentSnapshot> _formasPagamento = [];
+  List<DocumentSnapshot> _condicoesPagamento = [];
+
   bool _carregando = true;
   bool _salvandoNota = false;
 
   @override
   void initState() {
     super.initState();
-    _carregarInsumos();
+    _inicializarDados();
 
-    // Listeners inteligentes
     _qtdeController.addListener(_onQtdeChanged);
     _unitarioController.addListener(_onUnitarioChanged);
     _totalController.addListener(_onTotalChanged);
+  }
+
+  Future<void> _inicializarDados() async {
+    var snapshotInsumos = await FirebaseFirestore.instance
+        .collection('insumos')
+        .where('clienteId', isEqualTo: 'teste_textil')
+        .where('ativo', isEqualTo: true)
+        .get();
+    var snapshotFormas = await FirebaseFirestore.instance
+        .collection('formas_pagamento')
+        .where('clienteId', isEqualTo: 'teste_textil')
+        .where('ativo', isEqualTo: true)
+        .get();
+    var snapshotCondicoes = await FirebaseFirestore.instance
+        .collection('condicoes_pagamento')
+        .where('clienteId', isEqualTo: 'teste_textil')
+        .where('ativo', isEqualTo: true)
+        .get();
+
+    if (widget.documentoId != null) {
+      var docNota = await FirebaseFirestore.instance
+          .collection('entradas_estoque')
+          .doc(widget.documentoId)
+          .get();
+      if (docNota.exists) {
+        final dados = docNota.data() as Map<String, dynamic>;
+        _itensTemporarios = List<Map<String, dynamic>>.from(
+          dados['itens'] ?? [],
+        );
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _insumos = snapshotInsumos.docs;
+        _formasPagamento = snapshotFormas.docs;
+        _condicoesPagamento = snapshotCondicoes.docs;
+
+        _insumos.sort(
+          (a, b) => a['nome'].toString().toLowerCase().compareTo(
+            b['nome'].toString().toLowerCase(),
+          ),
+        );
+        _carregando = false;
+      });
+    }
   }
 
   @override
@@ -62,27 +111,6 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
     super.dispose();
   }
 
-  Future<void> _carregarInsumos() async {
-    var snapshot = await FirebaseFirestore.instance
-        .collection('insumos')
-        .where('clienteId', isEqualTo: 'teste_textil')
-        .where('ativo', isEqualTo: true)
-        .get();
-
-    if (mounted) {
-      setState(() {
-        _insumos = snapshot.docs;
-        _insumos.sort(
-          (a, b) => a['nome'].toString().toLowerCase().compareTo(
-            b['nome'].toString().toLowerCase(),
-          ),
-        );
-        _carregando = false;
-      });
-    }
-  }
-
-  // --- LÓGICA DE CÁLCULO BIDIRECIONAL ---
   double _parse(String valor) {
     return double.tryParse(valor.replaceAll('.', '').replaceAll(',', '.')) ??
         0.0;
@@ -92,9 +120,8 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
     if (_qtdeFocus.hasFocus) {
       double q = _parse(_qtdeController.text);
       double u = _parse(_unitarioController.text);
-      if (q > 0 && u > 0) {
+      if (q > 0 && u > 0)
         _totalController.text = (q * u).toStringAsFixed(2).replaceAll('.', ',');
-      }
     }
   }
 
@@ -102,9 +129,8 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
     if (_unitarioFocus.hasFocus) {
       double q = _parse(_qtdeController.text);
       double u = _parse(_unitarioController.text);
-      if (q > 0 && u > 0) {
+      if (q > 0 && u > 0)
         _totalController.text = (q * u).toStringAsFixed(2).replaceAll('.', ',');
-      }
     }
   }
 
@@ -112,30 +138,18 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
     if (_totalFocus.hasFocus) {
       double q = _parse(_qtdeController.text);
       double t = _parse(_totalController.text);
-      if (q > 0 && t > 0) {
+      if (q > 0 && t > 0)
         _unitarioController.text = (t / q)
             .toStringAsFixed(4)
             .replaceAll('.', ',');
-      }
     }
   }
-  // --------------------------------------
 
   void _adicionarItemRascunho() {
     if (_formKeyItem.currentState!.validate()) {
       double qtde = _parse(_qtdeController.text);
       double unit = _parse(_unitarioController.text);
       double total = _parse(_totalController.text);
-
-      if (qtde <= 0 || total <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Quantidade e Total devem ser maiores que zero.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
 
       setState(() {
         _itensTemporarios.add({
@@ -146,8 +160,6 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
           'valorUnitario': unit,
           'valorTotal': total,
         });
-
-        // Limpar os campos
         _insumoSelecionado = null;
         _nomeInsumoSelecionado = '';
         _qtdeController.clear();
@@ -158,22 +170,341 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
   }
 
   void _removerItem(int index) {
-    setState(() {
-      _itensTemporarios.removeAt(index);
-    });
+    setState(() => _itensTemporarios.removeAt(index));
   }
 
-  Future<void> _salvarNotaFinal(String status) async {
+  String _formatarData(DateTime data) {
+    return '${data.day.toString().padLeft(2, '0')}/${data.month.toString().padLeft(2, '0')}/${data.year}';
+  }
+
+  // ==========================================
+  // O CÉREBRO: PAINEL FINANCEIRO DE PARCELAMENTO
+  // ==========================================
+  void _abrirPainelFinanceiro() {
     if (_itensTemporarios.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Adicione pelo menos um item antes de salvar.'),
+          content: Text('Adicione pelo menos um item.'),
           backgroundColor: Colors.red,
         ),
       );
       return;
     }
 
+    double totalNota = _itensTemporarios.fold(
+      0,
+      (sum, item) => sum + item['valorTotal'],
+    );
+    if (totalNota <= 0) {
+      _salvarNotaFinal('Efetivada');
+      return;
+    }
+
+    String? formaSelecionada;
+    DocumentSnapshot? condicaoSelecionada;
+    int qtdeParcelas = 1;
+    DateTime dataPrimeiroVencimento = DateTime.now();
+    List<Map<String, dynamic>> parcelasGeradas = [];
+    final qtdeController = TextEditingController(text: '1');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            void gerarParcelas() {
+              if (condicaoSelecionada == null || formaSelecionada == null)
+                return;
+              parcelasGeradas.clear();
+              double valorParcela = totalNota / qtdeParcelas;
+
+              String unidade = condicaoSelecionada!['unidadeTempo'];
+              int intervalo = condicaoSelecionada!['intervalo'];
+
+              for (int i = 0; i < qtdeParcelas; i++) {
+                DateTime dataCalculada = dataPrimeiroVencimento;
+
+                // Motor de Recorrência Inteligente (Dias, Meses ou Anos)
+                if (unidade == 'Dias') {
+                  dataCalculada = dataPrimeiroVencimento.add(
+                    Duration(days: intervalo * i),
+                  );
+                } else if (unidade == 'Meses') {
+                  dataCalculada = DateTime(
+                    dataPrimeiroVencimento.year,
+                    dataPrimeiroVencimento.month + (intervalo * i),
+                    dataPrimeiroVencimento.day,
+                  );
+                } else if (unidade == 'Anos') {
+                  dataCalculada = DateTime(
+                    dataPrimeiroVencimento.year + (intervalo * i),
+                    dataPrimeiroVencimento.month,
+                    dataPrimeiroVencimento.day,
+                  );
+                }
+
+                parcelasGeradas.add({
+                  'vencimento': dataCalculada,
+                  'valor': valorParcela,
+                  'formaPagamentoId': formaSelecionada,
+                });
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+                left: 20,
+                right: 20,
+                top: 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Lançamento Financeiro',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.teal,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Valor Total da Nota: R\$ ${totalNota.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const Divider(),
+
+                    DropdownButtonFormField<String>(
+                      decoration: const InputDecoration(
+                        labelText: 'Forma de Pagamento',
+                        border: OutlineInputBorder(),
+                      ),
+                      value: formaSelecionada,
+                      items: _formasPagamento
+                          .map(
+                            (doc) => DropdownMenuItem(
+                              value: doc.id,
+                              child: Text(doc['nome']),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => setModalState(() {
+                        formaSelecionada = v;
+                        gerarParcelas();
+                      }),
+                    ),
+                    const SizedBox(height: 12),
+
+                    DropdownButtonFormField<DocumentSnapshot>(
+                      decoration: const InputDecoration(
+                        labelText: 'Prazo / Condição',
+                        border: OutlineInputBorder(),
+                      ),
+                      value: condicaoSelecionada,
+                      items: _condicoesPagamento
+                          .map(
+                            (doc) => DropdownMenuItem(
+                              value: doc,
+                              child: Text(doc['nome']),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => setModalState(() {
+                        condicaoSelecionada = v;
+                        gerarParcelas();
+                      }),
+                    ),
+                    const SizedBox(height: 12),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: qtdeController,
+                            decoration: const InputDecoration(
+                              labelText: 'Qtde Parcelas',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: TextInputType.number,
+                            onChanged: (v) {
+                              int? num = int.tryParse(v);
+                              if (num != null && num > 0) {
+                                setModalState(() {
+                                  qtdeParcelas = num;
+                                  gerarParcelas();
+                                });
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () async {
+                              DateTime? picked = await showDatePicker(
+                                context: context,
+                                initialDate: dataPrimeiroVencimento,
+                                firstDate: DateTime(2000),
+                                lastDate: DateTime(2101),
+                              );
+                              if (picked != null) {
+                                setModalState(() {
+                                  dataPrimeiroVencimento = picked;
+                                  gerarParcelas();
+                                });
+                              }
+                            },
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: '1º Vencimento',
+                                border: OutlineInputBorder(),
+                              ),
+                              child: Text(
+                                _formatarData(dataPrimeiroVencimento),
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 16),
+                    if (parcelasGeradas.isNotEmpty) ...[
+                      const Text(
+                        'Previsão de Pagamentos (Clique na data para editar):',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 150,
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: parcelasGeradas.length,
+                          itemBuilder: (context, index) {
+                            final p = parcelasGeradas[index];
+                            return Card(
+                              color: Colors.teal.shade50,
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: Colors.teal,
+                                  child: Text(
+                                    '${index + 1}',
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                                title: InkWell(
+                                  onTap: () async {
+                                    // PERMITE EDITAR MANUALMENTE UMA DATA ESPECÍFICA (Ex: Caiu no domingo)
+                                    DateTime? picked = await showDatePicker(
+                                      context: context,
+                                      initialDate: p['vencimento'],
+                                      firstDate: DateTime(2000),
+                                      lastDate: DateTime(2101),
+                                    );
+                                    if (picked != null)
+                                      setModalState(
+                                        () =>
+                                            parcelasGeradas[index]['vencimento'] =
+                                                picked,
+                                      );
+                                  },
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.edit_calendar,
+                                        size: 16,
+                                        color: Colors.teal,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _formatarData(p['vencimento']),
+                                        style: const TextStyle(
+                                          decoration: TextDecoration.underline,
+                                          color: Colors.teal,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                trailing: Text(
+                                  'R\$ ${p['valor'].toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        icon: const Icon(Icons.check_circle),
+                        label: const Text(
+                          'CONFIRMAR NOTA E FINANCEIRO',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        onPressed: () {
+                          if (formaSelecionada == null ||
+                              condicaoSelecionada == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Selecione Forma e Prazo!'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          Navigator.pop(context); // Fecha painel financeiro
+                          _salvarNotaFinal(
+                            'Efetivada',
+                            parcelasGeradas,
+                          ); // Dispara a gravação em lote
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ==========================================
+  // O GRAVADOR (BATCH) - ESTOQUE + FINANCEIRO
+  // ==========================================
+  Future<void> _salvarNotaFinal(
+    String status, [
+    List<Map<String, dynamic>>? parcelasFinanceiras,
+  ]) async {
     setState(() => _salvandoNota = true);
 
     try {
@@ -193,29 +524,74 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
         'itens': _itensTemporarios,
       };
 
-      await FirebaseFirestore.instance
-          .collection('entradas_estoque')
-          .add(dadosNota);
+      WriteBatch batch = FirebaseFirestore.instance.batch();
+
+      // 1. Grava a Capa da Nota
+      DocumentReference docNota = widget.documentoId == null
+          ? FirebaseFirestore.instance.collection('entradas_estoque').doc()
+          : FirebaseFirestore.instance
+                .collection('entradas_estoque')
+                .doc(widget.documentoId);
+
+      batch.set(docNota, dadosNota);
+
+      if (status == 'Efetivada') {
+        // 2. Atualiza o Estoque
+        for (var item in _itensTemporarios) {
+          if (item['tipo'] == 'Insumo' && item['insumoId'] != null) {
+            DocumentReference docInsumo = FirebaseFirestore.instance
+                .collection('insumos')
+                .doc(item['insumoId']);
+            batch.update(docInsumo, {
+              'estoqueAtual': FieldValue.increment(item['quantidade']),
+              'custoBase': item['valorUnitario'], // Atualiza Ficha Técnica
+            });
+          }
+        }
+
+        // 3. Injeta no Contas a Pagar
+        if (parcelasFinanceiras != null) {
+          for (int i = 0; i < parcelasFinanceiras.length; i++) {
+            var parcela = parcelasFinanceiras[i];
+            DocumentReference docConta = FirebaseFirestore.instance
+                .collection('contas_a_pagar')
+                .doc();
+            batch.set(docConta, {
+              'clienteId': 'teste_textil',
+              'fornecedorId': widget.fornecedorId,
+              'entradaEstoqueId': docNota.id,
+              'numeroDocumento': widget.numeroDocumento,
+              'parcela': '${i + 1}/${parcelasFinanceiras.length}',
+              'dataEmissao': FieldValue.serverTimestamp(),
+              'dataVencimento': Timestamp.fromDate(parcela['vencimento']),
+              'valor': parcela['valor'],
+              'formaPagamentoId': parcela['formaPagamentoId'],
+              'status': 'Pendente',
+            });
+          }
+        }
+      }
+
+      await batch.commit();
 
       if (mounted) {
         Navigator.pop(context);
-        Navigator.pop(context);
+        if (widget.documentoId == null) Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Nota $status com sucesso!'),
+            content: Text('Nota salva como $status!'),
             backgroundColor: Colors.green,
           ),
         );
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao salvar nota: $e'),
+            content: Text('Erro ao salvar: $e'),
             backgroundColor: Colors.red,
           ),
         );
-      }
     } finally {
       if (mounted) setState(() => _salvandoNota = false);
     }
@@ -225,7 +601,9 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('2. Itens da Entrada'),
+        title: Text(
+          widget.documentoId == null ? '2. Itens da Entrada' : 'Editar Itens',
+        ),
         backgroundColor: Colors.teal,
         foregroundColor: Colors.white,
       ),
@@ -239,7 +617,6 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                   child: Form(
                     key: _formKeyItem,
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
@@ -248,34 +625,33 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                               groupValue: _tipoLinha,
                               onChanged: (v) => setState(() => _tipoLinha = v!),
                             ),
-                            const Text('Produto/Insumo'),
+                            const Text('Insumo'),
                             Radio<String>(
                               value: 'Serviço',
                               groupValue: _tipoLinha,
                               onChanged: (v) => setState(() => _tipoLinha = v!),
                             ),
-                            const Text('Serviço/Despesa'),
+                            const Text('Serviço'),
                           ],
                         ),
-
                         Row(
                           children: [
                             Expanded(
                               child: DropdownButtonFormField<String>(
-                                decoration: InputDecoration(
-                                  labelText: _tipoLinha == 'Insumo'
-                                      ? 'Selecione o Insumo'
-                                      : 'Selecione o Serviço',
-                                  border: const OutlineInputBorder(),
+                                decoration: const InputDecoration(
+                                  labelText: 'Selecione o Item',
+                                  border: OutlineInputBorder(),
                                 ),
                                 value: _insumoSelecionado,
                                 isExpanded: true,
-                                items: _insumos.map((doc) {
-                                  return DropdownMenuItem(
-                                    value: doc.id,
-                                    child: Text(doc['nome']),
-                                  );
-                                }).toList(),
+                                items: _insumos
+                                    .map(
+                                      (doc) => DropdownMenuItem(
+                                        value: doc.id,
+                                        child: Text(doc['nome']),
+                                      ),
+                                    )
+                                    .toList(),
                                 onChanged: (v) {
                                   setState(() {
                                     _insumoSelecionado = v;
@@ -290,32 +666,27 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Colors.teal,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: IconButton(
-                                icon: const Icon(
-                                  Icons.add,
-                                  color: Colors.white,
+                            IconButton.filled(
+                              onPressed: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const FormInsumo(),
+                                  ),
+                                );
+                                _inicializarDados();
+                              },
+                              icon: const Icon(Icons.add),
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.teal,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
-                                onPressed: () async {
-                                  await Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => const FormInsumo(),
-                                    ),
-                                  );
-                                  _carregarInsumos();
-                                },
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 12),
-
-                        // NOVA DISPOSIÇÃO: 3 Campos conversando entre si
                         Row(
                           children: [
                             Expanded(
@@ -324,15 +695,13 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                                 controller: _qtdeController,
                                 focusNode: _qtdeFocus,
                                 decoration: const InputDecoration(
-                                  labelText: 'Qtde Total',
+                                  labelText: 'Qtde',
                                   border: OutlineInputBorder(),
                                 ),
                                 keyboardType:
                                     const TextInputType.numberWithOptions(
                                       decimal: true,
                                     ),
-                                validator: (v) =>
-                                    v!.isEmpty ? 'Obrigatório' : null,
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -342,21 +711,18 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                                 controller: _unitarioController,
                                 focusNode: _unitarioFocus,
                                 decoration: const InputDecoration(
-                                  labelText: 'Custo Unit. (R\$)',
+                                  labelText: 'Unitário (R\$)',
                                   border: OutlineInputBorder(),
                                 ),
                                 keyboardType:
                                     const TextInputType.numberWithOptions(
                                       decimal: true,
                                     ),
-                                validator: (v) =>
-                                    v!.isEmpty ? 'Obrigatório' : null,
                               ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 12),
-
                         Row(
                           children: [
                             Expanded(
@@ -364,15 +730,13 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                                 controller: _totalController,
                                 focusNode: _totalFocus,
                                 decoration: const InputDecoration(
-                                  labelText: 'Valor Total (R\$)',
+                                  labelText: 'Total (R\$)',
                                   border: OutlineInputBorder(),
                                 ),
                                 keyboardType:
                                     const TextInputType.numberWithOptions(
                                       decimal: true,
                                     ),
-                                validator: (v) =>
-                                    v!.isEmpty ? 'Obrigatório' : null,
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -382,7 +746,7 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                                 Icons.add_shopping_cart,
                                 size: 16,
                               ),
-                              label: const Text('Inserir Item'),
+                              label: const Text('Inserir'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.teal.shade50,
                                 foregroundColor: Colors.teal,
@@ -398,14 +762,12 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                     ),
                   ),
                 ),
-
                 const Divider(height: 1, thickness: 2),
-
                 Expanded(
                   child: _itensTemporarios.isEmpty
                       ? const Center(
                           child: Text(
-                            'Nenhum item adicionado à nota ainda.',
+                            'Nenhum item na nota.',
                             style: TextStyle(color: Colors.grey),
                           ),
                         )
@@ -419,17 +781,11 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                                 vertical: 6,
                               ),
                               child: ListTile(
-                                leading: CircleAvatar(
-                                  backgroundColor: item['tipo'] == 'Insumo'
-                                      ? Colors.blueGrey
-                                      : Colors.orange,
-                                  child: Icon(
-                                    item['tipo'] == 'Insumo'
-                                        ? Icons.inventory_2
-                                        : Icons.build,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
+                                leading: Icon(
+                                  item['tipo'] == 'Insumo'
+                                      ? Icons.inventory_2
+                                      : Icons.build,
+                                  color: Colors.teal,
                                 ),
                                 title: Text(
                                   item['nomeInsumo'],
@@ -438,9 +794,8 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                                   ),
                                 ),
                                 subtitle: Text(
-                                  'Qtde: ${item['quantidade']} un | Unit: R\$ ${item['valorUnitario'].toStringAsFixed(4)}\nTotal: R\$ ${item['valorTotal'].toStringAsFixed(2)}',
+                                  'Qtde: ${item['quantidade']} | Total: R\$ ${item['valorTotal'].toStringAsFixed(2)}',
                                 ),
-                                isThreeLine: true,
                                 trailing: IconButton(
                                   icon: const Icon(
                                     Icons.delete,
@@ -453,19 +808,9 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                           },
                         ),
                 ),
-
                 Container(
                   padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.2),
-                        spreadRadius: 1,
-                        blurRadius: 5,
-                      ),
-                    ],
-                  ),
+                  color: Colors.white,
                   child: _salvandoNota
                       ? const Center(child: CircularProgressIndicator())
                       : Row(
@@ -474,19 +819,14 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                               child: OutlinedButton(
                                 onPressed: () =>
                                     _salvarNotaFinal('Em Digitação'),
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 16,
-                                  ),
-                                  foregroundColor: Colors.teal,
-                                ),
                                 child: const Text('GUARDAR RASCUNHO'),
                               ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: ElevatedButton(
-                                onPressed: () => _salvarNotaFinal('Efetivada'),
+                                onPressed:
+                                    _abrirPainelFinanceiro, // <--- AQUI A MÁGICA ACONTECE
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.teal,
                                   foregroundColor: Colors.white,

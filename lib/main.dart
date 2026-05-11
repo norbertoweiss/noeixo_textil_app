@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_localizations/flutter_localizations.dart'; // PACOTE DE IDIOMA
 import 'firebase_options.dart';
 import 'screens/cadastros_base/tela_cadastros_base.dart';
+import 'screens/finananceiro/tela_financeiro_menu.dart' show TelaFinanceiroMenu;
 import 'screens/fornecedores/tela_fornecedores.dart';
 import 'screens/insumos/tela_abas_suprimentos.dart';
 
-// NOVAS IMPORTAÇÕES DO ESTOQUE
+// IMPORTAÇÕES DO ESTOQUE
 import 'screens/estoque/tela_entrada_conferencia.dart';
 import 'screens/estoque/tela_estoque_materia_prima.dart';
+
+// IMPORTAÇÃO DO FINANCEIRO
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +29,15 @@ class NoEixoTextilApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'NoEixo Têxtil',
+
+      // CONFIGURAÇÃO DO IDIOMA PORTUGUÊS (BRASIL)
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('pt', 'BR')],
+
       theme: ThemeData(
         primarySwatch: Colors.blueGrey,
         useMaterial3: true,
@@ -60,9 +73,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
     const TelaEngenhariaMenu(),
     const Center(child: Text('🏭 Maestro PCP', style: TextStyle(fontSize: 20))),
     const Center(child: Text('🧵 Produção', style: TextStyle(fontSize: 20))),
-    const Center(
-      child: Text('💰 Gestão Financeira', style: TextStyle(fontSize: 20)),
-    ),
+    const TelaFinanceiroMenu(),
     const Center(
       child: Text('👥 RH & Pessoas', style: TextStyle(fontSize: 20)),
     ),
@@ -224,7 +235,6 @@ class TelaSuprimentosMenu extends StatelessWidget {
           Colors.indigo,
           const TelaAbasSuprimentos(),
         ),
-        // BOTÕES LIGADOS CORRETAMENTE ÀS NOVAS TELAS
         _botaoMenuResponsivo(
           context,
           'Entrada / Conferência',
