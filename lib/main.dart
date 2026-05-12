@@ -1,18 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_localizations/flutter_localizations.dart'; // PACOTE DE IDIOMA
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'firebase_options.dart';
+
+// --- IMPORTAÇÕES DE CADASTROS E SUPRIMENTOS ---
 import 'screens/cadastros_base/tela_cadastros_base.dart';
-import 'screens/finananceiro/tela_financeiro_menu.dart' show TelaFinanceiroMenu;
 import 'screens/fornecedores/tela_fornecedores.dart';
 import 'screens/insumos/tela_abas_suprimentos.dart';
 
-// IMPORTAÇÕES DO ESTOQUE
+// --- IMPORTAÇÕES DO ESTOQUE ---
 import 'screens/estoque/tela_entrada_conferencia.dart';
 import 'screens/estoque/tela_estoque_materia_prima.dart';
 
-// IMPORTAÇÃO DO FINANCEIRO
+// --- IMPORTAÇÃO DO FINANCEIRO ---
+import 'screens/financeiro/tela_financeiro_menu.dart';
+
+// --- IMPORTAÇÃO DA ENGENHARIA ---
+import 'screens/engenharia/tela_lista_processos.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +30,7 @@ void main() async {
 
 class NoEixoTextilApp extends StatelessWidget {
   const NoEixoTextilApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -129,7 +135,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             const Padding(
               padding: EdgeInsets.all(16.0),
               child: Text(
-                'v 1.6.7',
+                'v 1.6.8',
                 style: TextStyle(color: Colors.grey, fontSize: 12),
               ),
             ),
@@ -282,12 +288,13 @@ class TelaEngenhariaMenu extends StatelessWidget {
           Colors.indigo,
           const Center(child: Text('Cadastro de Produtos')),
         ),
+        // LIGAÇÃO DA NOVA TELA DE PROCESSOS AQUI!
         _botaoMenuResponsivo(
           context,
           'Processos',
           Icons.account_tree,
           Colors.teal,
-          const Center(child: Text('Fluxo de Produção')),
+          const TelaListaProcessos(),
         ),
         _botaoMenuResponsivo(
           context,
