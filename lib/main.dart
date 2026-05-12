@@ -16,8 +16,10 @@ import 'screens/estoque/tela_estoque_materia_prima.dart';
 // --- IMPORTAÇÃO DO FINANCEIRO ---
 import 'screens/financeiro/tela_financeiro_menu.dart';
 
-// --- IMPORTAÇÃO DA ENGENHARIA ---
+// --- IMPORTAÇÕES DA ENGENHARIA ---
 import 'screens/engenharia/tela_lista_processos.dart';
+import 'screens/engenharia/tela_lista_produtos.dart';
+import 'screens/engenharia/tela_lista_fichas.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -135,7 +137,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             const Padding(
               padding: EdgeInsets.all(16.0),
               child: Text(
-                'v 1.6.8',
+                'v 1.6.9',
                 style: TextStyle(color: Colors.grey, fontSize: 12),
               ),
             ),
@@ -286,9 +288,8 @@ class TelaEngenhariaMenu extends StatelessWidget {
           'Produtos',
           Icons.category,
           Colors.indigo,
-          const Center(child: Text('Cadastro de Produtos')),
+          const TelaListaProdutos(),
         ),
-        // LIGAÇÃO DA NOVA TELA DE PROCESSOS AQUI!
         _botaoMenuResponsivo(
           context,
           'Processos',
@@ -301,7 +302,7 @@ class TelaEngenhariaMenu extends StatelessWidget {
           'Fichas Técnicas',
           Icons.description,
           Colors.brown,
-          const Center(child: Text('Composição e Custos')),
+          const TelaListaFichas(),
         ),
       ],
     );
