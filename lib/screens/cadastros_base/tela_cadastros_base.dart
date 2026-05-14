@@ -5,7 +5,7 @@ import '../../models/cor_model.dart';
 import 'form_grade.dart';
 import 'form_cor.dart';
 import 'form_tecido.dart';
-import 'form_unidade_medida.dart'; // AQUI ESTÁ A NOVA IMPORTAÇÃO
+import 'form_unidade_medida.dart';
 
 class TelaCadastrosBase extends StatefulWidget {
   const TelaCadastrosBase({super.key});
@@ -21,12 +21,11 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
   String _filtroGrades = 'Todos';
   String _filtroCores = 'Todos';
   String _filtroTecidos = 'Todos';
-  String _filtroUnidades = 'Todos'; // NOVO FILTRO PARA AS UNIDADES
+  String _filtroUnidades = 'Todos';
 
   @override
   void initState() {
     super.initState();
-    // ATUALIZADO: De 3 para 4 abas
     _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       setState(() {});
@@ -39,7 +38,6 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
     super.dispose();
   }
 
-  // Função para mudar Ativo/Inativo direto na nuvem
   Future<void> _alterarStatus(
     String colecao,
     String id,
@@ -62,20 +60,25 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
+        foregroundColor:
+            Colors.blueGrey, // Garante que a seta de voltar apareça nesta cor
+        title: const Text(
+          'Cadastros Base',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         elevation: 1,
-        toolbarHeight: 0,
+        // O toolbarHeight: 0 foi removido para permitir que a seta de voltar e o título sejam exibidos.
         bottom: TabBar(
           controller: _tabController,
           labelColor: Colors.blueGrey,
           unselectedLabelColor: Colors.grey,
           indicatorColor: Colors.blueGrey,
-          isScrollable:
-              true, // IMPORTANTE: Permite deslizar as abas em telas pequenas
+          isScrollable: true,
           tabs: const [
             Tab(text: 'Grades'),
             Tab(text: 'Cores'),
             Tab(text: 'Tecidos'),
-            Tab(text: 'Unidades'), // NOVA ABA
+            Tab(text: 'Unidades'),
           ],
         ),
       ),
@@ -85,7 +88,7 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
           _buildAbaGrades(),
           _buildAbaCores(),
           _buildAbaTecidos(),
-          _buildAbaUnidades(), // NOVA VISTA
+          _buildAbaUnidades(),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -104,7 +107,6 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
               MaterialPageRoute(builder: (context) => const FormTecido()),
             );
           } else if (_tabController.index == 3) {
-            // NAVEGAÇÃO PARA O NOVO FORMULÁRIO DE UNIDADES
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -475,7 +477,6 @@ class _TelaCadastrosBaseState extends State<TelaCadastrosBase>
                               size: 20,
                             ),
                             onPressed: () {
-                              // NAVEGAÇÃO PARA O FORMULÁRIO DE UNIDADE NO MODO EDIÇÃO
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(

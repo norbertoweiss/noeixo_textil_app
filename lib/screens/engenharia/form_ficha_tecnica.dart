@@ -1,17 +1,17 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-// IMPORTANTE: Certifique-se de importar o seu form de produtos
+import 'package:image_picker/image_picker.dart';
 import 'form_produto.dart';
 
 class FormFichaTecnica extends StatefulWidget {
   final String? fichaId;
   final Map<String, dynamic>? dadosAtuais;
 
-  const FormFichaTecnica({Key? key, this.fichaId, this.dadosAtuais})
-    : super(key: key);
+  const FormFichaTecnica({super.key, this.fichaId, this.dadosAtuais});
 
   @override
-  _FormFichaTecnicaState createState() => _FormFichaTecnicaState();
+  State<FormFichaTecnica> createState() => _FormFichaTecnicaState();
 }
 
 class _FormFichaTecnicaState extends State<FormFichaTecnica> {
@@ -19,7 +19,10 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
   bool _isLoading = false;
   bool _carregandoBase = true;
 
-  // Cabeçalho
+  // RASTREADOR DE ALTERAÇÕES
+  bool _houveAlteracao = false;
+
+  // --- DADOS DA FICHA ---
   String? _produtoSelecionadoId;
   String? _produtoNome;
   String? _referencia;
@@ -27,13 +30,15 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
   String? _gradeNome;
   List<String> _tamanhosGrade = [];
 
-  // Listas de Dados Dinâmicos
   List<Map<String, dynamic>> _insumosConsumidos = [];
   List<Map<String, dynamic>> _processosRoteiro = [];
+  List<Map<String, dynamic>> _itensQualidade = []; // Aba 4
 
-  // Listas para o Autocomplete
+  // --- LISTAS PARA O AUTOCOMPLETE ---
   List<Map<String, dynamic>> _produtosList = [];
   List<Map<String, dynamic>> _gradesList = [];
+  List<Map<String, dynamic>> _insumosBaseList = [];
+  List<Map<String, dynamic>> _parametrosQualidadeBase = [];
 
   @override
   void initState() {
@@ -46,6 +51,7 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
       _referencia = widget.dadosAtuais!['referencia'];
       _gradeSelecionadaId = widget.dadosAtuais!['gradeId'];
       _gradeNome = widget.dadosAtuais!['gradeNome'];
+
       _tamanhosGrade = List<String>.from(widget.dadosAtuais!['tamanhos'] ?? []);
       _insumosConsumidos = List<Map<String, dynamic>>.from(
         widget.dadosAtuais!['insumos'] ?? [],
@@ -53,19 +59,26 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
       _processosRoteiro = List<Map<String, dynamic>>.from(
         widget.dadosAtuais!['processos'] ?? [],
       );
+      _itensQualidade = List<Map<String, dynamic>>.from(
+        widget.dadosAtuais!['qualidade'] ?? [],
+      );
     }
   }
 
-  // Busca todos os produtos e grades do Firebase para alimentar a pesquisa
   Future<void> _carregarDadosBase() async {
     setState(() => _carregandoBase = true);
     try {
       final prodSnap = await FirebaseFirestore.instance
           .collection('produtos')
           .get();
-      // NOTA: Se as suas grades estiverem numa coleção com nome diferente de 'grades', ajuste abaixo
       final gradesSnap = await FirebaseFirestore.instance
           .collection('grades')
+          .get();
+      final insumosSnap = await FirebaseFirestore.instance
+          .collection('insumos')
+          .get();
+      final qualidadeSnap = await FirebaseFirestore.instance
+          .collection('parametros_qualidade')
           .get();
 
       setState(() {
@@ -73,6 +86,12 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
             .map((d) => {'id': d.id, ...d.data()})
             .toList();
         _gradesList = gradesSnap.docs
+            .map((d) => {'id': d.id, ...d.data()})
+            .toList();
+        _insumosBaseList = insumosSnap.docs
+            .map((d) => {'id': d.id, ...d.data()})
+            .toList();
+        _parametrosQualidadeBase = qualidadeSnap.docs
             .map((d) => {'id': d.id, ...d.data()})
             .toList();
         _carregandoBase = false;
@@ -105,6 +124,7 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
       'tamanhos': _tamanhosGrade,
       'insumos': _insumosConsumidos,
       'processos': _processosRoteiro,
+      'qualidade': _itensQualidade,
       'atualizadoEm': FieldValue.serverTimestamp(),
     };
 
@@ -121,49 +141,119 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
             .update(dados);
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Ficha salva com sucesso!')));
-      Navigator.pop(context);
+      _houveAlteracao = false;
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ficha salva com sucesso!')),
+        );
+        Navigator.pop(context);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro: $e')));
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
+  }
+
+  Future<bool> _avisarSaidaSemSalvar() async {
+    if (!_houveAlteracao) return true;
+
+    final sair = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Atenção!', style: TextStyle(color: Colors.red)),
+        content: const Text(
+          'Você tem alterações que não foram salvas. Se sair agora, perderá o trabalho feito. Deseja sair mesmo assim?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sair sem salvar'),
+          ),
+        ],
+      ),
+    );
+    return sair ?? false;
   }
 
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            widget.fichaId == null ? 'Nova Ficha Técnica' : 'Editar Ficha',
-          ),
-          actions: [
-            IconButton(icon: const Icon(Icons.save), onPressed: _salvarFicha),
-          ],
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Identificação', icon: Icon(Icons.info_outline)),
-              Tab(text: 'Insumos', icon: Icon(Icons.inventory_2_outlined)),
-              Tab(text: 'Processos', icon: Icon(Icons.account_tree_outlined)),
-            ],
-          ),
-        ),
-        body: _isLoading || _carregandoBase
-            ? const Center(child: CircularProgressIndicator())
-            : TabBarView(
-                children: [_abaIdentificacao(), _abaInsumos(), _abaProcessos()],
+      length: 4,
+      child: WillPopScope(
+        onWillPop: _avisarSaidaSemSalvar,
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text(
+              widget.fichaId == null ? 'Nova Ficha Técnica' : 'Editar Ficha',
+            ),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(
+                  right: 8.0,
+                  top: 8.0,
+                  bottom: 8.0,
+                ),
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.white24,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: const Icon(Icons.save),
+                  label: const Text(
+                    'SALVAR',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: _salvarFicha,
+                ),
               ),
+            ],
+            bottom: const TabBar(
+              isScrollable: true,
+              tabs: [
+                Tab(text: 'Identificação', icon: Icon(Icons.info_outline)),
+                Tab(text: 'Insumos', icon: Icon(Icons.inventory_2_outlined)),
+                Tab(text: 'Processos', icon: Icon(Icons.account_tree_outlined)),
+                Tab(text: 'Qualidade', icon: Icon(Icons.verified_outlined)),
+              ],
+            ),
+          ),
+          body: _isLoading || _carregandoBase
+              ? const Center(child: CircularProgressIndicator())
+              : TabBarView(
+                  children: [
+                    _abaIdentificacao(),
+                    _abaInsumos(),
+                    _abaProcessos(),
+                    _abaQualidade(),
+                  ],
+                ),
+        ),
       ),
     );
   }
 
-  // --- ABA 1: IDENTIFICAÇÃO ---
+  // =========================================================================
+  // ABA 1: IDENTIFICAÇÃO
+  // =========================================================================
   Widget _abaIdentificacao() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -179,7 +269,7 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
             ),
             const SizedBox(height: 24),
 
-            // ----- PESQUISA DE PRODUTO -----
+            // --- PRODUTO ---
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -193,8 +283,9 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
                     displayStringForOption: (option) =>
                         '${option['referencia']} - ${option['nome']}',
                     optionsBuilder: (TextEditingValue textEditingValue) {
-                      if (textEditingValue.text == '')
+                      if (textEditingValue.text.isEmpty) {
                         return const Iterable<Map<String, dynamic>>.empty();
+                      }
                       final query = textEditingValue.text.toLowerCase();
                       return _produtosList.where(
                         (p) =>
@@ -213,6 +304,7 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
                         _produtoSelecionadoId = selection['id'];
                         _produtoNome = selection['nome'];
                         _referencia = selection['referencia'];
+                        _houveAlteracao = true;
                       });
                     },
                     fieldViewBuilder:
@@ -239,7 +331,6 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
                     icon: const Icon(Icons.add, color: Colors.white),
                     tooltip: 'Novo Produto',
                     onPressed: () async {
-                      // Vai para a tela de Produto, quando voltar recarrega a lista
                       await Navigator.push(
                         context,
                         MaterialPageRoute(builder: (_) => const FormProduto()),
@@ -252,7 +343,7 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
             ),
             const SizedBox(height: 24),
 
-            // ----- PESQUISA DE GRADE -----
+            // --- GRADE ---
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -268,8 +359,9 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
                       return '${option['nome']} (${tam.join('/')})';
                     },
                     optionsBuilder: (TextEditingValue textEditingValue) {
-                      if (textEditingValue.text == '')
+                      if (textEditingValue.text.isEmpty) {
                         return const Iterable<Map<String, dynamic>>.empty();
+                      }
                       final query = textEditingValue.text.toLowerCase();
                       return _gradesList.where((g) {
                         final nomeMatch =
@@ -291,6 +383,7 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
                         _tamanhosGrade = List<String>.from(
                           selection['tamanhos'] ?? [],
                         );
+                        _houveAlteracao = true;
                       });
                     },
                     fieldViewBuilder:
@@ -322,7 +415,7 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
               ],
             ),
 
-            // Resumo Visual da Seleção
+            // --- RESUMO VINCULADO ---
             if (_produtoSelecionadoId != null ||
                 _gradeSelecionadaId != null) ...[
               const SizedBox(height: 32),
@@ -363,7 +456,6 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
     );
   }
 
-  // --- MODAL PARA CRIAR NOVA GRADE RAPIDAMENTE ---
   void _modalNovaGrade() {
     String nomeGrade = "";
     String tamanhosInput = "";
@@ -409,15 +501,17 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
                     'tamanhos': listaTamanhos,
                     'criadoEm': FieldValue.serverTimestamp(),
                   });
-                  Navigator.pop(context); // Fecha o modal
-                  _carregarDadosBase(); // Atualiza as listas do Autocomplete
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Grade criada!')),
-                  );
+                  if (mounted) Navigator.pop(context);
+                  _carregarDadosBase();
+                  if (mounted)
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Grade criada!')),
+                    );
                 } catch (e) {
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(SnackBar(content: Text('Erro: $e')));
+                  if (mounted)
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('Erro: $e')));
                 }
               }
             },
@@ -428,15 +522,25 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
     );
   }
 
-  // --- ABA 2: INSUMOS E MOTOR DE CÁLCULO CAD ---
+  // =========================================================================
+  // ABA 2: INSUMOS
+  // =========================================================================
   Widget _abaInsumos() {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(8.0),
+          padding: const EdgeInsets.all(16.0),
           child: ElevatedButton.icon(
-            icon: const Icon(Icons.add),
-            label: const Text('Adicionar Tecido/Insumo'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blueGrey,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(double.infinity, 50),
+            ),
+            icon: const Icon(Icons.add_circle_outline),
+            label: const Text(
+              'Adicionar Insumo à Ficha',
+              style: TextStyle(fontSize: 16),
+            ),
             onPressed: () {
               if (_tamanhosGrade.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -457,19 +561,79 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
             itemCount: _insumosConsumidos.length,
             itemBuilder: (context, index) {
               final item = _insumosConsumidos[index];
+
+              String subtitulo = '';
+              if (item['comportamento'] == 'fixo') {
+                subtitulo =
+                    'Quantidade: ${item['qtd_fixa']} ${item['unidade']}';
+              } else if (item['comportamento'] == 'variavel') {
+                subtitulo = 'Qtd Variável por Grade (${item['unidade']})';
+              } else {
+                subtitulo = 'Área CAD (${item['gramatura']} g/m²)';
+              }
+
               return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: ListTile(
-                  leading: const Icon(Icons.texture, color: Colors.indigo),
-                  title: Text(item['nome']),
-                  subtitle: Text(
-                    item['tipo_calculo'] == 'cad'
-                        ? 'Cálculo por Área CAD'
-                        : 'Peso Médio',
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.blueGrey.shade100,
+                    child: Icon(
+                      item['comportamento'] == 'cad'
+                          ? Icons.architecture
+                          : Icons.inventory_2,
+                      color: Colors.blueGrey,
+                    ),
                   ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () =>
-                        setState(() => _insumosConsumidos.removeAt(index)),
+                  title: Text(
+                    item['nome'],
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(subtitulo),
+                      if (item['perda'] > 0)
+                        Text(
+                          'Perda/Quebra: ${item['perda']}%',
+                          style: const TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 12,
+                          ),
+                        ),
+                      if (item['observacao'] != '')
+                        Text(
+                          'Obs: ${item['observacao']}',
+                          style: const TextStyle(
+                            fontStyle: FontStyle.italic,
+                            fontSize: 12,
+                          ),
+                        ),
+                    ],
+                  ),
+                  isThreeLine: true,
+                  trailing: Wrap(
+                    spacing: 8,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit, color: Colors.blueGrey),
+                        tooltip: 'Editar Insumo',
+                        onPressed: () =>
+                            _modalAdicionarInsumo(indexEdicao: index),
+                      ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          color: Colors.red,
+                        ),
+                        tooltip: 'Remover Insumo',
+                        onPressed: () {
+                          setState(() {
+                            _insumosConsumidos.removeAt(index);
+                            _houveAlteracao = true;
+                          });
+                        },
+                      ),
+                    ],
                   ),
                 ),
               );
@@ -480,94 +644,280 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
     );
   }
 
-  void _modalAdicionarInsumo() {
-    String nomeInsumo = "";
-    String tipoCalculo = "peso";
-    double gramatura = 0;
-    double eficiencia = 90.0;
-    Map<String, double> areasPorTamanho = {};
+  void _modalAdicionarInsumo({int? indexEdicao}) {
+    Map<String, dynamic>? insumoSelecionado;
+    String comportamento = 'fixo';
+
+    TextEditingController qtdFixaCtrl = TextEditingController();
+    TextEditingController perdaCtrl = TextEditingController();
+    TextEditingController obsCtrl = TextEditingController();
+    TextEditingController gramaturaCtrl = TextEditingController();
+    TextEditingController eficienciaCtrl = TextEditingController(text: '90');
+
+    Map<String, TextEditingController> qtdVariavelCtrls = {};
+    Map<String, TextEditingController> areasCadCtrls = {};
+
+    for (var t in _tamanhosGrade) {
+      qtdVariavelCtrls[t] = TextEditingController();
+      areasCadCtrls[t] = TextEditingController();
+    }
+
+    if (indexEdicao != null) {
+      final itemEditado = _insumosConsumidos[indexEdicao];
+      insumoSelecionado = {
+        'id': itemEditado['insumoId'],
+        'nome': itemEditado['nome'],
+        'unidade': itemEditado['unidade'],
+      };
+
+      comportamento = itemEditado['comportamento'] ?? 'fixo';
+      qtdFixaCtrl.text = itemEditado['qtd_fixa']?.toString() ?? '';
+      perdaCtrl.text = itemEditado['perda']?.toString() ?? '';
+      obsCtrl.text = itemEditado['observacao'] ?? '';
+      gramaturaCtrl.text = itemEditado['gramatura']?.toString() ?? '';
+      eficienciaCtrl.text = itemEditado['eficiencia_risco']?.toString() ?? '90';
+
+      if (comportamento == 'variavel') {
+        final mapaVar =
+            itemEditado['qtd_variavel'] as Map<String, dynamic>? ?? {};
+        mapaVar.forEach((tamanho, valor) {
+          if (qtdVariavelCtrls.containsKey(tamanho)) {
+            qtdVariavelCtrls[tamanho]!.text = valor.toString();
+          }
+        });
+      } else if (comportamento == 'cad') {
+        final mapaCad = itemEditado['areas_cad'] as Map<String, dynamic>? ?? {};
+        mapaCad.forEach((tamanho, valor) {
+          if (areasCadCtrls.containsKey(tamanho)) {
+            areasCadCtrls[tamanho]!.text = valor.toString();
+          }
+        });
+      }
+    }
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => AlertDialog(
-          title: const Text('Configurar Insumo'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  decoration: const InputDecoration(
-                    labelText: 'Nome do Tecido',
-                  ),
-                  onChanged: (v) => nomeInsumo = v,
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  value: tipoCalculo,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Método de Custeio',
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'peso',
-                      child: Text('Peso Médio / Padrão'),
+          title: Text(
+            indexEdicao == null ? 'Configurar Insumo' : 'Editar Insumo',
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Autocomplete<Map<String, dynamic>>(
+                    initialValue: TextEditingValue(
+                      text: insumoSelecionado?['nome'] ?? '',
                     ),
-                    DropdownMenuItem(
-                      value: 'cad',
-                      child: Text('Cálculo por Área CAD (Precisão)'),
+                    displayStringForOption: (option) =>
+                        '${option['nome']} (${option['unidade'] ?? 'UN'})',
+                    optionsBuilder: (TextEditingValue textEditingValue) {
+                      if (textEditingValue.text.isEmpty) {
+                        return const Iterable<Map<String, dynamic>>.empty();
+                      }
+                      final query = textEditingValue.text.toLowerCase();
+                      return _insumosBaseList.where(
+                        (i) =>
+                            (i['nome']?.toString().toLowerCase().contains(
+                              query,
+                            ) ??
+                            false),
+                      );
+                    },
+                    onSelected: (selection) {
+                      setModalState(() {
+                        insumoSelecionado = selection;
+                      });
+                    },
+                    fieldViewBuilder:
+                        (context, controller, focusNode, onFieldSubmitted) {
+                          return TextFormField(
+                            controller: controller,
+                            focusNode: focusNode,
+                            decoration: const InputDecoration(
+                              labelText: 'Buscar Insumo do Estoque',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.search),
+                            ),
+                          );
+                        },
+                  ),
+
+                  if (insumoSelecionado != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Unidade de Medida: ${insumoSelecionado!['unidade'] ?? 'Não definida'}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blueGrey,
+                      ),
                     ),
                   ],
-                  onChanged: (v) => setModalState(() => tipoCalculo = v!),
-                ),
-                if (tipoCalculo == 'cad') ...[
-                  const SizedBox(height: 16),
-                  const Divider(),
-                  const Text(
-                    "Preencha as Áreas do Molde (m²)",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey,
+                  const SizedBox(height: 24),
+
+                  DropdownButtonFormField<String>(
+                    value: comportamento,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      labelText: 'Comportamento de Consumo',
                     ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'fixo',
+                        child: Text('Fixo por Peça (Ex: 1 Etiqueta)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'variavel',
+                        child: Text('Variável por Tamanho (Ex: Elástico)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'cad',
+                        child: Text('Cálculo de Área CAD (Para Malhas)'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      setModalState(() {
+                        comportamento = v!;
+                      });
+                    },
                   ),
-                  ..._tamanhosGrade
-                      .map(
-                        (t) => Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: TextField(
-                            decoration: InputDecoration(
-                              labelText: 'Tamanho $t',
-                              suffixText: 'm²',
-                              border: const OutlineInputBorder(),
+                  const SizedBox(height: 24),
+
+                  if (comportamento == 'fixo') ...[
+                    TextFormField(
+                      controller: qtdFixaCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Quantidade',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                    ),
+                  ] else if (comportamento == 'variavel') ...[
+                    const Text(
+                      "Preencha a quantidade por tamanho:",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: _tamanhosGrade
+                          .map(
+                            (t) => SizedBox(
+                              width: 100,
+                              child: TextFormField(
+                                controller: qtdVariavelCtrls[t],
+                                decoration: InputDecoration(
+                                  labelText: 'Tam $t',
+                                  border: const OutlineInputBorder(),
+                                ),
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                              ),
                             ),
-                            keyboardType: TextInputType.number,
-                            onChanged: (v) => areasPorTamanho[t] =
-                                double.tryParse(v.replaceAll(',', '.')) ?? 0,
+                          )
+                          .toList(),
+                    ),
+                  ] else if (comportamento == 'cad') ...[
+                    const Text(
+                      "Preencha as Áreas do Molde (m²)",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: _tamanhosGrade
+                          .map(
+                            (t) => SizedBox(
+                              width: 120,
+                              child: TextFormField(
+                                controller: areasCadCtrls[t],
+                                decoration: InputDecoration(
+                                  labelText: 'Tam $t (m²)',
+                                  border: const OutlineInputBorder(),
+                                ),
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: gramaturaCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Gramatura (g/m²)',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                           ),
                         ),
-                      )
-                      .toList(),
-                  const SizedBox(height: 16),
-                  TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Gramatura do Tecido (g/m²)',
-                      border: OutlineInputBorder(),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextFormField(
+                            controller: eficienciaCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Aprov. Risco (%)',
+                              border: OutlineInputBorder(),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    keyboardType: TextInputType.number,
-                    onChanged: (v) => gramatura = double.tryParse(v) ?? 0,
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Aproveitamento Risco (%)',
-                      border: OutlineInputBorder(),
-                    ),
-                    keyboardType: TextInputType.number,
-                    onChanged: (v) => eficiencia = double.tryParse(v) ?? 90,
+                  ],
+                  const SizedBox(height: 24),
+                  const Divider(),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 1,
+                        child: TextFormField(
+                          controller: perdaCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Quebra/Perda (%)',
+                            border: OutlineInputBorder(),
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: TextFormField(
+                          controller: obsCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Observação (Opcional)',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
-              ],
+              ),
             ),
           ),
           actions: [
@@ -576,19 +926,71 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
               child: const Text('Cancelar'),
             ),
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueGrey,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () {
-                setState(() {
-                  _insumosConsumidos.add({
-                    'nome': nomeInsumo,
-                    'tipo_calculo': tipoCalculo,
-                    'areas': areasPorTamanho,
-                    'gramatura': gramatura,
-                    'eficiencia': eficiencia,
+                if (insumoSelecionado == null && _insumosBaseList.isNotEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Selecione um insumo da lista.'),
+                    ),
+                  );
+                  return;
+                }
+
+                Map<String, double> mapaVariavel = {};
+                Map<String, double> mapaCad = {};
+
+                if (comportamento == 'variavel') {
+                  qtdVariavelCtrls.forEach((key, ctrl) {
+                    mapaVariavel[key] =
+                        double.tryParse(ctrl.text.replaceAll(',', '.')) ?? 0;
                   });
+                } else if (comportamento == 'cad') {
+                  areasCadCtrls.forEach((key, ctrl) {
+                    mapaCad[key] =
+                        double.tryParse(ctrl.text.replaceAll(',', '.')) ?? 0;
+                  });
+                }
+
+                final dadosInsumo = {
+                  'insumoId': insumoSelecionado?['id'] ?? 'novo',
+                  'nome': insumoSelecionado?['nome'] ?? 'Insumo Genérico',
+                  'unidade': insumoSelecionado?['unidade'] ?? 'UN',
+                  'comportamento': comportamento,
+                  'qtd_fixa':
+                      double.tryParse(qtdFixaCtrl.text.replaceAll(',', '.')) ??
+                      0,
+                  'qtd_variavel': mapaVariavel,
+                  'areas_cad': mapaCad,
+                  'gramatura':
+                      double.tryParse(
+                        gramaturaCtrl.text.replaceAll(',', '.'),
+                      ) ??
+                      0,
+                  'eficiencia_risco':
+                      double.tryParse(
+                        eficienciaCtrl.text.replaceAll(',', '.'),
+                      ) ??
+                      90,
+                  'perda':
+                      double.tryParse(perdaCtrl.text.replaceAll(',', '.')) ?? 0,
+                  'observacao': obsCtrl.text,
+                };
+
+                setState(() {
+                  if (indexEdicao == null) {
+                    _insumosConsumidos.add(dadosInsumo);
+                  } else {
+                    _insumosConsumidos[indexEdicao] = dadosInsumo;
+                  }
+                  _houveAlteracao = true;
                 });
                 Navigator.pop(context);
               },
-              child: const Text('Confirmar'),
+              child: const Text('Confirmar Insumo'),
             ),
           ],
         ),
@@ -596,7 +998,9 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
     );
   }
 
-  // --- ABA 3: ROTEIRO DE PROCESSOS ---
+  // =========================================================================
+  // ABA 3: ROTEIRO DE PROCESSOS
+  // =========================================================================
   Widget _abaProcessos() {
     return Column(
       children: [
@@ -623,6 +1027,257 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
           ),
         ),
       ],
+    );
+  }
+
+  // =========================================================================
+  // ABA 4: QUALIDADE
+  // =========================================================================
+  Widget _abaQualidade() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(double.infinity, 50),
+            ),
+            onPressed: () {
+              if (_tamanhosGrade.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Selecione uma Grade na Aba Identificação primeiro!',
+                    ),
+                  ),
+                );
+                return;
+              }
+              _modalAdicionarQualidade();
+            },
+            icon: const Icon(Icons.add_task),
+            label: const Text('Adicionar Requisito de Qualidade'),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: _itensQualidade.length,
+            itemBuilder: (context, index) {
+              final item = _itensQualidade[index];
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: ListTile(
+                  leading:
+                      item['fotoBase64'] != null &&
+                          item['fotoBase64'].toString().isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: Image.memory(
+                            base64Decode(item['fotoBase64'].toString()),
+                            width: 50,
+                            height: 50,
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.image_not_supported,
+                          color: Colors.grey,
+                        ),
+                  title: Text(
+                    item['parametro'].toString(),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    'Especificação: ${item['valor']} (${item['tolerancia']})',
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    onPressed: () {
+                      setState(() {
+                        _itensQualidade.removeAt(index);
+                        _houveAlteracao = true;
+                      });
+                    },
+                  ),
+                  onTap: () => _modalAdicionarQualidade(indexEdicao: index),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _modalAdicionarQualidade({int? indexEdicao}) {
+    String parametro = '';
+    final TextEditingController valorCtrl = TextEditingController();
+
+    // NOTA TÉCNICA: O acento em "tolerânciaCtrl" foi removido para evitar
+    // erros de compilação no linter do Flutter.
+    final TextEditingController toleranciaCtrl = TextEditingController();
+
+    String? fotoBase64;
+
+    if (indexEdicao != null) {
+      final item = _itensQualidade[indexEdicao];
+      parametro = item['parametro']?.toString() ?? '';
+      valorCtrl.text = item['valor']?.toString() ?? '';
+      toleranciaCtrl.text = item['tolerancia']?.toString() ?? '';
+      fotoBase64 = item['fotoBase64'];
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => AlertDialog(
+          title: Text(
+            indexEdicao == null ? 'Novo Item de Qualidade' : 'Editar Qualidade',
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Autocomplete<Map<String, dynamic>>(
+                  initialValue: TextEditingValue(text: parametro),
+
+                  // TIPAGEM CORRIGIDA PARA EVITAR ERROS: Forçamos a saída como String
+                  displayStringForOption: (Map<String, dynamic> option) =>
+                      option['nome'].toString(),
+
+                  optionsBuilder: (TextEditingValue v) {
+                    if (v.text.isEmpty) {
+                      return const Iterable<Map<String, dynamic>>.empty();
+                    }
+                    return _parametrosQualidadeBase.where(
+                      (p) => p['nome'].toString().toLowerCase().contains(
+                        v.text.toLowerCase(),
+                      ),
+                    );
+                  },
+                  onSelected: (Map<String, dynamic> s) {
+                    parametro = s['nome'].toString();
+                  },
+                  fieldViewBuilder:
+                      (
+                        BuildContext ctx,
+                        TextEditingController ctrl,
+                        FocusNode focus,
+                        VoidCallback submit,
+                      ) {
+                        return TextFormField(
+                          controller: ctrl,
+                          focusNode: focus,
+                          decoration: const InputDecoration(
+                            labelText: 'Parâmetro (Ex: Largura da Barra)',
+                            border: OutlineInputBorder(),
+                          ),
+                        );
+                      },
+                ),
+                const SizedBox(height: 16),
+
+                TextFormField(
+                  controller: valorCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Valor Esperado',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                TextFormField(
+                  controller: toleranciaCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Tolerância (+/-)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // --- CAPTURA DE FOTO PADRÃO ---
+                const Text(
+                  'Foto do Padrão Visual:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                if (fotoBase64 != null && fotoBase64!.isNotEmpty)
+                  Image.memory(base64Decode(fotoBase64!), height: 120),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.camera_alt),
+                      onPressed: () async {
+                        final img = await ImagePicker().pickImage(
+                          source: ImageSource.camera,
+                          imageQuality: 50,
+                        );
+                        if (img != null) {
+                          final bytes = await img.readAsBytes();
+                          setModalState(() {
+                            fotoBase64 = base64Encode(bytes);
+                          });
+                        }
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.photo_library),
+                      onPressed: () async {
+                        final img = await ImagePicker().pickImage(
+                          source: ImageSource.gallery,
+                          imageQuality: 50,
+                        );
+                        if (img != null) {
+                          final bytes = await img.readAsBytes();
+                          setModalState(() {
+                            fotoBase64 = base64Encode(bytes);
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                final novoItem = {
+                  'parametro': parametro,
+                  'valor': valorCtrl.text,
+                  'tolerancia': toleranciaCtrl.text,
+                  'fotoBase64': fotoBase64,
+                };
+
+                setState(() {
+                  if (indexEdicao == null) {
+                    _itensQualidade.add(novoItem);
+                  } else {
+                    _itensQualidade[indexEdicao] = novoItem;
+                  }
+                  _houveAlteracao = true;
+                });
+
+                Navigator.pop(context);
+              },
+              child: const Text('Confirmar'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

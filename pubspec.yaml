@@ -13,14 +13,16 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
-  image_picker: ^1.0.7
+  image_picker: ^1.2.2
   
   # Motores do Firebase para ligar ao banco de dados
-  firebase_core: ^2.30.0
-  cloud_firestore: ^4.17.0
+  firebase_core: ^4.8.0
+  cloud_firestore: ^6.4.0
   url_launcher: ^6.3.2
   flutter_localizations:
     sdk: flutter
+  firebase_storage: ^13.4.0
+  video_player: ^2.11.1
 
 dev_dependencies:
   flutter_test:

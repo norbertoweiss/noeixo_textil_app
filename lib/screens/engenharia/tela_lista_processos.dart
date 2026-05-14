@@ -10,190 +10,169 @@ class TelaListaProcessos extends StatefulWidget {
 }
 
 class _TelaListaProcessosState extends State<TelaListaProcessos> {
-  // Estado do Filtro
-  String _filtro = 'Todos';
+  String _filtroAtual = 'Todos';
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Processos de Engenharia'),
+        title: const Text(
+          'Processos de Engenharia',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.teal,
         foregroundColor: Colors.white,
       ),
       body: Column(
         children: [
-          // PAINEL DE FILTROS SUPERIOR
-          Container(
-            padding: const EdgeInsets.all(12),
-            color: Colors.white,
-            child: Row(
-              children: [
-                const Text(
-                  'Mostrar: ',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'Todos', label: Text('Todos')),
-                      ButtonSegment(value: 'Interna', label: Text('Fábrica')),
-                      ButtonSegment(value: 'Externa', label: Text('Facção')),
-                    ],
-                    selected: {_filtro},
-                    onSelectionChanged: (Set<String> newSelection) {
-                      setState(() => _filtro = newSelection.first);
-                    },
-                    style: ButtonStyle(
-                      backgroundColor: MaterialStateProperty.resolveWith<Color>(
-                        (states) {
-                          if (states.contains(MaterialState.selected))
-                            return Colors.teal.shade100;
-                          return Colors.white;
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, thickness: 2),
-
-          // LISTA DE PROCESSOS
+          _construirFiltro(),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
-                  .collection('engenharia_processos')
-                  .where('clienteId', isEqualTo: 'teste_textil')
+                  .collection('processos_engenharia')
                   .snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData)
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
-
-                final docs = snapshot.data!.docs;
-
-                // FILTRAGEM NA MEMÓRIA
-                var listaFiltrada = docs.where((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  final execucao = data['execucao'] ?? 'Interna';
-                  if (_filtro != 'Todos' && execucao != _filtro) return false;
-                  return true;
-                }).toList();
-
-                if (listaFiltrada.isEmpty) {
+                }
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return const Center(
                     child: Text(
-                      'Nenhum processo encontrado para este filtro.',
+                      'Nenhum processo cadastrado.',
                       style: TextStyle(color: Colors.grey),
                     ),
                   );
                 }
 
+                // Filtrar Interno/Externo
+                var documentos = snapshot.data!.docs.where((doc) {
+                  final tipo = doc['tipo'] ?? 'Interno';
+                  if (_filtroAtual == 'Fábrica') return tipo == 'Interno';
+                  if (_filtroAtual == 'Facção') return tipo == 'Externo';
+                  return true;
+                }).toList();
+
+                // Agrupar por Setor
+                Map<String, List<QueryDocumentSnapshot>> processosPorSetor = {};
+                for (var doc in documentos) {
+                  String setor = doc['setor'] ?? 'Outros';
+                  if (!processosPorSetor.containsKey(setor)) {
+                    processosPorSetor[setor] = [];
+                  }
+                  processosPorSetor[setor]!.add(doc);
+                }
+
+                // Obter as chaves (Setores) ordenadas alfabeticamente
+                List<String> setores = processosPorSetor.keys.toList()..sort();
+
                 return ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: listaFiltrada.length,
+                  itemCount: setores.length,
                   itemBuilder: (context, index) {
-                    final doc = listaFiltrada[index];
-                    final data = doc.data() as Map<String, dynamic>;
-                    final DateTime? dataAtt =
-                        (data['dataUltimaAtualizacao'] as Timestamp?)?.toDate();
+                    String setor = setores[index];
+                    List<QueryDocumentSnapshot> operacoes =
+                        processosPorSetor[setor]!;
 
-                    // Identificação Visual do Local de Execução
-                    final String execucao = data['execucao'] ?? 'Interna';
-                    final bool isInterno = execucao == 'Interna';
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Cabeçalho do Setor
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          color: Colors.teal.shade50,
+                          child: Text(
+                            setor.toUpperCase(),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.teal.shade800,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        // Lista de Operações daquele Setor
+                        ...operacoes.map((doc) {
+                          final data = doc.data() as Map<String, dynamic>;
+                          final isInterno = data['tipo'] == 'Interno';
 
-                    // Cálculo de expiração (180 dias = 6 meses)
-                    bool defasado = false;
-                    if (dataAtt != null) {
-                      defasado =
-                          DateTime.now().difference(dataAtt).inDays > 180;
-                    }
-
-                    return Card(
-                      elevation: 2,
-                      color: defasado ? Colors.amber.shade50 : Colors.white,
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: isInterno
-                              ? Colors.teal.shade100
-                              : Colors.indigo.shade100,
-                          // Se estiver defasado, mostra o Alerta. Se não, mostra o ícone de Fábrica ou Camião.
-                          child: Icon(
-                            defasado
-                                ? Icons.warning_amber_rounded
-                                : (isInterno
+                          return Card(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 6,
+                            ),
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: isInterno
+                                    ? Colors.teal.shade100
+                                    : Colors.indigo.shade100,
+                                child: Icon(
+                                  isInterno
                                       ? Icons.precision_manufacturing
-                                      : Icons.local_shipping),
-                            color: defasado
-                                ? Colors.orange
-                                : (isInterno ? Colors.teal : Colors.indigo),
-                          ),
-                        ),
-                        title: Row(
-                          children: [
-                            Text(
-                              data['nome'] ?? '',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            // ETIQUETA VISUAL (CHIP) DE INTERNO/EXTERNO
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isInterno ? Colors.teal : Colors.indigo,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                execucao.toUpperCase(),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
+                                      : Icons.local_shipping,
+                                  color: isInterno
+                                      ? Colors.teal
+                                      : Colors.indigo,
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 4),
-                            Text(
-                              'Custo Padrão: R\$ ${data['custoPadrao'].toStringAsFixed(2)} (${data['baseCusto']})',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w500,
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      data['nome'] ?? '',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isInterno
+                                          ? Colors.teal
+                                          : Colors.indigo,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      isInterno ? 'INTERNA' : 'EXTERNA',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                            if (dataAtt != null)
-                              Text(
-                                'Última revisão: ${dataAtt.day}/${dataAtt.month}/${dataAtt.year}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: defasado ? Colors.red : Colors.grey,
+                              subtitle: Text(
+                                'Custo Padrão: R\$ ${data['custoPadrao']?.toStringAsFixed(2) ?? '0.00'}',
+                              ),
+                              trailing: IconButton(
+                                icon: const Icon(
+                                  Icons.edit,
+                                  color: Colors.blueGrey,
                                 ),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => FormProcesso(
+                                        processoId: doc.id,
+                                        dadosAtuais: data,
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
-                          ],
-                        ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blueGrey),
-                          onPressed: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  FormProcesso(documento: doc),
                             ),
-                          ),
-                        ),
-                      ),
+                          );
+                        }).toList(),
+                        const SizedBox(height: 10),
+                      ],
                     );
                   },
                 );
@@ -204,14 +183,36 @@ class _TelaListaProcessosState extends State<TelaListaProcessos> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: Colors.teal,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text(
+          'NOVO PROCESSO',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         onPressed: () => Navigator.push(
           context,
           MaterialPageRoute(builder: (context) => const FormProcesso()),
         ),
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text(
-          'NOVO PROCESSO',
-          style: TextStyle(color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _construirFiltro() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: SegmentedButton<String>(
+        segments: const [
+          ButtonSegment(value: 'Todos', label: Text('Todos')),
+          ButtonSegment(value: 'Fábrica', label: Text('Fábrica')),
+          ButtonSegment(value: 'Facção', label: Text('Facção')),
+        ],
+        selected: {_filtroAtual},
+        onSelectionChanged: (Set<String> novaSelecao) {
+          setState(() => _filtroAtual = novaSelecao.first);
+        },
+        style: SegmentedButton.styleFrom(
+          selectedForegroundColor: Colors.white,
+          selectedBackgroundColor: Colors.teal,
         ),
       ),
     );
