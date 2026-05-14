@@ -6,6 +6,7 @@ import 'firebase_options.dart';
 
 // --- IMPORTAÇÕES DE CADASTROS E SUPRIMENTOS ---
 import 'screens/cadastros_base/tela_cadastros_base.dart';
+import 'screens/cadastros_base/tela_parametros_qualidade.dart'; // NOVO: Dicionário de Qualidade
 import 'screens/fornecedores/tela_fornecedores.dart';
 import 'screens/insumos/tela_abas_suprimentos.dart';
 
@@ -303,6 +304,14 @@ class TelaEngenhariaMenu extends StatelessWidget {
           Icons.description,
           Colors.brown,
           const TelaListaFichas(),
+        ),
+        // NOVO BOTÃO ADICIONADO AQUI:
+        _botaoMenuResponsivo(
+          context,
+          'Dicionário de Qualidade',
+          Icons.verified_outlined,
+          Colors.deepPurple,
+          const TelaParametrosQualidade(),
         ),
       ],
     );
