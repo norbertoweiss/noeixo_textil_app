@@ -6,7 +6,7 @@ import 'firebase_options.dart';
 
 // --- IMPORTAÇÕES DE CADASTROS E SUPRIMENTOS ---
 import 'screens/cadastros_base/tela_cadastros_base.dart';
-import 'screens/cadastros_base/tela_parametros_qualidade.dart'; // NOVO: Dicionário de Qualidade
+import 'screens/cadastros_base/tela_parametros_qualidade.dart';
 import 'screens/fornecedores/tela_fornecedores.dart';
 import 'screens/insumos/tela_abas_suprimentos.dart';
 
@@ -21,6 +21,10 @@ import 'screens/financeiro/tela_financeiro_menu.dart';
 import 'screens/engenharia/tela_lista_processos.dart';
 import 'screens/engenharia/tela_lista_produtos.dart';
 import 'screens/engenharia/tela_lista_fichas.dart';
+
+// --- IMPORTAÇÕES DO COMERCIAL ---
+import 'screens/comercial/tela_carteira_clientes.dart';
+import 'screens/comercial/tela_gestao_regioes.dart'; // NOVA IMPORTAÇÃO AQUI
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,15 +42,12 @@ class NoEixoTextilApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'NoEixo Têxtil',
-
-      // CONFIGURAÇÃO DO IDIOMA PORTUGUÊS (BRASIL)
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: const [Locale('pt', 'BR')],
-
       theme: ThemeData(
         primarySwatch: Colors.blueGrey,
         useMaterial3: true,
@@ -76,9 +77,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       child: Text('📊 Dashboard Operacional', style: TextStyle(fontSize: 20)),
     ),
     const TelaSuprimentosMenu(),
-    const Center(
-      child: Text('🛒 Comercial & Vendas', style: TextStyle(fontSize: 20)),
-    ),
+    const TelaComercialMenu(), // MENU COMERCIAL ATIVO
     const TelaEngenhariaMenu(),
     const Center(child: Text('🏭 Maestro PCP', style: TextStyle(fontSize: 20))),
     const Center(child: Text('🧵 Produção', style: TextStyle(fontSize: 20))),
@@ -138,7 +137,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             const Padding(
               padding: EdgeInsets.all(16.0),
               child: Text(
-                'v 1.6.9',
+                'v 1.7.1',
                 style: TextStyle(color: Colors.grey, fontSize: 12),
               ),
             ),
@@ -305,13 +304,60 @@ class TelaEngenhariaMenu extends StatelessWidget {
           Colors.brown,
           const TelaListaFichas(),
         ),
-        // NOVO BOTÃO ADICIONADO AQUI:
         _botaoMenuResponsivo(
           context,
           'Dicionário de Qualidade',
           Icons.verified_outlined,
           Colors.deepPurple,
           const TelaParametrosQualidade(),
+        ),
+      ],
+    );
+  }
+}
+
+class TelaComercialMenu extends StatelessWidget {
+  const TelaComercialMenu({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    double largura = MediaQuery.of(context).size.width;
+    int colunas = largura > 800 ? 4 : 2;
+
+    return GridView.count(
+      padding: const EdgeInsets.all(20),
+      crossAxisCount: colunas,
+      crossAxisSpacing: 15,
+      mainAxisSpacing: 15,
+      children: [
+        _botaoMenuResponsivo(
+          context,
+          'Carteira & CRM',
+          Icons.badge,
+          Colors.indigo,
+          const TelaCarteiraClientes(),
+        ),
+        _botaoMenuResponsivo(
+          context,
+          'Regiões & Territórios',
+          Icons.map,
+          Colors.deepPurple,
+          const TelaGestaoRegioes(), // O BOTÃO NOVO LIGADO AQUI
+        ),
+        _botaoMenuResponsivo(
+          context,
+          'Novo Pedido',
+          Icons.add_shopping_cart,
+          Colors.teal,
+          const Center(
+            child: Text(
+              'Carrinho em Construção',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ),
       ],
     );
