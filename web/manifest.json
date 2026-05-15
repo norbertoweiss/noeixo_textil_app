@@ -1,11 +1,11 @@
 {
-    "name": "noeixo_textil_app",
-    "short_name": "noeixo_textil_app",
+    "name": "NoEixo Têxtil",
+    "short_name": "NoEixo Têxtil",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#1A237E",
+    "theme_color": "#1A237E",
+    "description": "Engenharia B2B e Gestão Têxtil",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
