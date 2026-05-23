@@ -6,10 +6,16 @@ import 'form_produto.dart';
 import 'form_processo.dart'; // NOVO: Importação para criar operações na hora
 
 class FormFichaTecnica extends StatefulWidget {
+  final String empresaId; // <-- CHAVE MESTRA INJETADA AQUI
   final String? fichaId;
   final Map<String, dynamic>? dadosAtuais;
 
-  const FormFichaTecnica({super.key, this.fichaId, this.dadosAtuais});
+  const FormFichaTecnica({
+    super.key,
+    required this.empresaId, // <-- OBRIGATÓRIA NA CONSTRUÇÃO
+    this.fichaId,
+    this.dadosAtuais,
+  });
 
   @override
   State<FormFichaTecnica> createState() => _FormFichaTecnicaState();
@@ -70,9 +76,12 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
   Future<void> _carregarDadosBase() async {
     setState(() => _carregandoBase = true);
     try {
+      // TRAVA MESTRA NAS BUSCAS DE BASE: Produtos filtrados pela empresa
       final prodSnap = await FirebaseFirestore.instance
           .collection('produtos')
+          .where('empresa_id', isEqualTo: widget.empresaId)
           .get();
+
       final gradesSnap = await FirebaseFirestore.instance
           .collection('grades')
           .get();
@@ -139,6 +148,7 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
 
     setState(() => _isLoading = true);
     final dados = {
+      'empresa_id': widget.empresaId, // <-- CARIMBO DE ISOLAMENTO DA FICHA
       'produtoId': _produtoSelecionadoId,
       'produtoNome': _produtoNome,
       'referencia': _referencia,
@@ -331,9 +341,6 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
     );
   }
 
-  // =========================================================================
-  // ABA 1: IDENTIFICAÇÃO E ABA 2: INSUMOS (100% PRESERVADAS)
-  // =========================================================================
   Widget _abaIdentificacao() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -408,7 +415,12 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
                     onPressed: () async {
                       await Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const FormProduto()),
+                        MaterialPageRoute(
+                          builder: (_) => FormProduto(
+                            empresaId: widget
+                                .empresaId, // <-- O SEGREDO ESTÁ AQUI (A TRAVA FOI REPASSADA)
+                          ),
+                        ),
                       );
                       _carregarDadosBase();
                     },
@@ -1042,9 +1054,6 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
     );
   }
 
-  // =========================================================================
-  // ABA 3: ROTEIRO DE PROCESSOS (AGORA COM EDITAR, INATIVAR E CRIAR GLOBAIS)
-  // =========================================================================
   Widget _abaProcessos() {
     return Column(
       children: [
@@ -1094,9 +1103,7 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
                   },
                   itemBuilder: (context, index) {
                     final proc = _processosRoteiro[index];
-                    bool ativo =
-                        proc['ativo'] ??
-                        true; // Lê o status de inativação local
+                    bool ativo = proc['ativo'] ?? true;
 
                     return Card(
                       key: ValueKey('${proc['id']}_$index'),
@@ -1158,7 +1165,6 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            // BOTÃO EDITAR / INATIVAR LOCAL
                             IconButton(
                               icon: const Icon(
                                 Icons.edit,
@@ -1190,7 +1196,6 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
     );
   }
 
-  // MODAL PARA ADICIONAR (COM ATALHO PARA CRIAR NOVA OPERAÇÃO GLOBAL)
   void _modalAdicionarProcesso() {
     showDialog(
       context: context,
@@ -1233,7 +1238,7 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
                               'tipo': procBase['tipo'],
                               'tempoMinutos': procBase['tempoMinutos'] ?? 0.0,
                               'custoExterno': procBase['custoExterno'] ?? 0.0,
-                              'ativo': true, // Padrao ao adicionar
+                              'ativo': true,
                               'observacao': '',
                             });
                             _houveAlteracao = true;
@@ -1250,7 +1255,6 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
             onPressed: () => Navigator.pop(context),
             child: const Text('Fechar'),
           ),
-          // O BOTÃO DE CRIAR ATALHO
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.teal,
@@ -1259,12 +1263,12 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
             icon: const Icon(Icons.add),
             label: const Text('Criar Nova na Base'),
             onPressed: () async {
-              Navigator.pop(context); // Fecha o modal
+              Navigator.pop(context);
               await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const FormProcesso()),
               );
-              _carregarDadosBase(); // Recarrega a base quando voltar
+              _carregarDadosBase();
             },
           ),
         ],
@@ -1272,7 +1276,6 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
     );
   }
 
-  // MODAL PARA EDITAR/INATIVAR APENAS NESTE ROTEIRO (MUDANÇA LOCAL)
   void _modalEditarProcessoRoteiro(int index) {
     final proc = _processosRoteiro[index];
     bool isAtivo = proc['ativo'] ?? true;
@@ -1346,9 +1349,6 @@ class _FormFichaTecnicaState extends State<FormFichaTecnica> {
     );
   }
 
-  // =========================================================================
-  // ABA 4: QUALIDADE (100% PRESERVADA)
-  // =========================================================================
   Widget _abaQualidade() {
     return Column(
       children: [

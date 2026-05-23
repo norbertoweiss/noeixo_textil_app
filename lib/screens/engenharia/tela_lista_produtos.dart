@@ -3,7 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'form_produto.dart';
 
 class TelaListaProdutos extends StatefulWidget {
-  const TelaListaProdutos({Key? key}) : super(key: key);
+  final String empresaId;
+
+  const TelaListaProdutos({Key? key, required this.empresaId})
+    : super(key: key);
 
   @override
   _TelaListaProdutosState createState() => _TelaListaProdutosState();
@@ -15,9 +18,11 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
 
   Future<void> _deletarProduto(String id) async {
     await _produtosRef.doc(id).delete();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Produto excluído com sucesso!')),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Produto excluído com sucesso!')),
+      );
+    }
   }
 
   @override
@@ -28,18 +33,28 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
         centerTitle: true,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _produtosRef.orderBy('nome').snapshots(),
+        stream: _produtosRef
+            .where('empresa_id', isEqualTo: widget.empresaId)
+            .orderBy('nome')
+            .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
-            return const Center(child: Text('Erro ao carregar produtos.'));
+            print('🔥🔥🔥 LINK DO ÍNDICE FIREBASE AQUI: ${snapshot.error}');
+            return const Center(
+              child: Text(
+                'Erro ao carregar produtos. (Verifique o Console do F12)',
+              ),
+            );
           }
 
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Nenhum produto cadastrado.'));
+            return const Center(
+              child: Text('Nenhum produto cadastrado para esta empresa.'),
+            );
           }
 
           final produtos = snapshot.data!.docs;
@@ -80,6 +95,8 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
                             context,
                             MaterialPageRoute(
                               builder: (context) => FormProduto(
+                                empresaId: widget
+                                    .empresaId, // <-- CHAVE INJETADA NO BOTÃO EDITAR
                                 produtoId: produto.id,
                                 dadosAtuais: data,
                               ),
@@ -104,11 +121,16 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const FormProduto()),
+            MaterialPageRoute(
+              builder: (context) => FormProduto(
+                empresaId:
+                    widget.empresaId, // <-- CHAVE INJETADA NO BOTÃO NOVO (+)
+              ),
+            ),
           );
         },
-        child: const Icon(Icons.add),
         tooltip: 'Novo Produto',
+        child: const Icon(Icons.add),
       ),
     );
   }

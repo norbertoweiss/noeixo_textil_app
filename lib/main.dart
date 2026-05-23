@@ -25,7 +25,7 @@ import 'screens/engenharia/tela_lista_fichas.dart';
 // --- IMPORTAÇÕES DO COMERCIAL ---
 import 'screens/comercial/tela_carteira_clientes.dart';
 import 'screens/comercial/tela_gestao_regioes.dart';
-import 'screens/comercial/tela_cadastro_vendedor.dart'; // Nova Ficha de Vendedores Conectada
+import 'screens/comercial/tela_cadastro_vendedor.dart';
 
 // --- IMPORTAÇÃO DA GESTÃO DO SISTEMA (NOEIXO) ---
 import 'gestao_sistema/telas/tela_dashboard_admin.dart';
@@ -144,7 +144,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             context,
             todasAsAbas,
             true,
-            empresaId,
+            'HOLDING_DEV', // Trava de isolamento do desenvolvedor
             perfil,
             todasAsAbas,
           );
@@ -228,20 +228,19 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         tituloExibicao: 'Suprimentos',
         telaWidget: const TelaSuprimentosMenu(),
       ),
-
-      // SATELLITE UPDATE: Passa o ID da fábrica ativa diretamente para o sub-menu comercial
       ModuloItem(
         nomeChave: 'Comercial',
         icone: Icons.sell,
         tituloExibicao: 'Comercial',
         telaWidget: TelaComercialMenu(empresaId: empresaId),
       ),
-
       ModuloItem(
         nomeChave: 'Engenharia',
         icone: Icons.architecture,
         tituloExibicao: 'Engenharia & Modelagem',
-        telaWidget: const TelaEngenhariaMenu(),
+        telaWidget: TelaEngenhariaMenu(
+          empresaId: empresaId,
+        ), // Chave conectada à Engenharia
       ),
       ModuloItem(
         nomeChave: 'PCP',
@@ -256,7 +255,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         icone: Icons.checkroom,
         tituloExibicao: 'Chão de Fábrica',
         telaWidget: const Center(
-          child: Text('🧵 Producão', style: TextStyle(fontSize: 20)),
+          child: Text('🧵 Produção', style: TextStyle(fontSize: 20)),
         ),
       ),
       ModuloItem(
@@ -282,8 +281,9 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         .where((m) => modulosParaExibir.contains(m.nomeChave))
         .toList();
 
-    if (menusFiltrados.isEmpty)
+    if (menusFiltrados.isEmpty) {
       menusFiltrados.add(catalogoModulosOpcionais.first);
+    }
 
     final bool possuiAutorizacaoDePainel =
         (perfil == 'master' ||
@@ -386,7 +386,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             const Padding(
               padding: EdgeInsets.all(16.0),
               child: Text(
-                'v 1.8.1',
+                'v 1.8.3 - Multi-Tenant Seguro',
                 style: TextStyle(color: Colors.grey, fontSize: 12),
               ),
             ),
@@ -487,7 +487,9 @@ class TelaSuprimentosMenu extends StatelessWidget {
 }
 
 class TelaEngenhariaMenu extends StatelessWidget {
-  const TelaEngenhariaMenu({super.key});
+  final String empresaId;
+  const TelaEngenhariaMenu({super.key, required this.empresaId});
+
   @override
   Widget build(BuildContext context) {
     double largura = MediaQuery.of(context).size.width;
@@ -510,7 +512,7 @@ class TelaEngenhariaMenu extends StatelessWidget {
           'Produtos',
           Icons.category,
           Colors.indigo,
-          const TelaListaProdutos(),
+          TelaListaProdutos(empresaId: empresaId),
         ),
         _botaoMenuResponsivo(
           context,
@@ -524,7 +526,9 @@ class TelaEngenhariaMenu extends StatelessWidget {
           'Fichas Técnicas',
           Icons.description,
           Colors.brown,
-          const TelaListaFichas(),
+          TelaListaFichas(
+            empresaId: empresaId,
+          ), // <-- A ÚLTIMA TRAVA DE ISOLAMENTO INJETADA AQUI!
         ),
         _botaoMenuResponsivo(
           context,
@@ -566,8 +570,6 @@ class TelaComercialMenu extends StatelessWidget {
           Colors.deepPurple,
           const TelaGestaoRegioes(),
         ),
-
-        // BOTÃO INTEGRADO: Substitui o botão temporário pela Ficha de Vendedores Real
         _botaoMenuResponsivo(
           context,
           'Cadastro de Vendedores',

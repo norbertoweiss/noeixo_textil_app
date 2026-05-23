@@ -3,7 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'form_ficha_tecnica.dart';
 
 class TelaListaFichas extends StatefulWidget {
-  const TelaListaFichas({Key? key}) : super(key: key);
+  final String empresaId; // <-- 1. CHAVE MESTRA RECEBIDA AQUI
+
+  const TelaListaFichas({Key? key, required this.empresaId}) : super(key: key);
 
   @override
   _TelaListaFichasState createState() => _TelaListaFichasState();
@@ -19,14 +21,31 @@ class _TelaListaFichasState extends State<TelaListaFichas> {
     return Scaffold(
       appBar: AppBar(title: const Text('Fichas Técnicas'), centerTitle: true),
       body: StreamBuilder<QuerySnapshot>(
-        stream: _fichasRef.orderBy('criadoEm', descending: true).snapshots(),
+        // 2. TRAVA DE ISOLAMENTO: Filtra as fichas apenas para esta empresa
+        stream: _fichasRef
+            .where('empresa_id', isEqualTo: widget.empresaId)
+            .orderBy('criadoEm', descending: true)
+            .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
+
+          if (snapshot.hasError) {
+            // FORÇA O FLUTTER A CUSPIR O LINK DO ÍNDICE NO CONSOLE (F12) DO CHROME
+            print('🔥🔥🔥 LINK DO ÍNDICE FIREBASE AQUI: ${snapshot.error}');
+            return const Center(
+              child: Text(
+                'Erro ao carregar fichas. (Verifique o Console do F12)',
+              ),
+            );
+          }
+
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(
-              child: Text('Nenhuma ficha técnica encontrada.'),
+              child: Text(
+                'Nenhuma ficha técnica encontrada para esta empresa.',
+              ),
             );
           }
 
@@ -56,6 +75,8 @@ class _TelaListaFichasState extends State<TelaListaFichas> {
                       context,
                       MaterialPageRoute(
                         builder: (context) => FormFichaTecnica(
+                          empresaId: widget
+                              .empresaId, // <-- 3. CHAVE REPASSADA PARA O BOTÃO EDITAR
                           fichaId: ficha.id,
                           dadosAtuais: data,
                         ),
@@ -73,7 +94,12 @@ class _TelaListaFichasState extends State<TelaListaFichas> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const FormFichaTecnica()),
+            MaterialPageRoute(
+              builder: (context) => FormFichaTecnica(
+                empresaId: widget
+                    .empresaId, // <-- 4. CHAVE REPASSADA PARA O BOTÃO NOVO (+)
+              ),
+            ),
           );
         },
         child: const Icon(Icons.add, color: Colors.white),

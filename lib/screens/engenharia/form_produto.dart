@@ -2,11 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FormProduto extends StatefulWidget {
+  final String empresaId; // <-- CHAVE MESTRA RECEBIDA AQUI
   final String? produtoId;
   final Map<String, dynamic>? dadosAtuais;
 
-  const FormProduto({Key? key, this.produtoId, this.dadosAtuais})
-    : super(key: key);
+  const FormProduto({
+    Key? key,
+    required this.empresaId, // <-- OBRIGATÓRIO NA CONSTRUÇÃO
+    this.produtoId,
+    this.dadosAtuais,
+  }) : super(key: key);
 
   @override
   _FormProdutoState createState() => _FormProdutoState();
@@ -58,11 +63,13 @@ class _FormProdutoState extends State<FormProduto> {
 
     setState(() => _isLoading = true);
 
+    // INJEÇÃO DA CHAVE: O sistema agora carimba a empresa dona do produto
     final dadosProduto = {
       'nome': _nomeController.text.trim(),
       'referencia': _referenciaController.text.trim(),
       'descricao': _descricaoController.text.trim(),
       'tipo': _tipoSelecionado,
+      'empresa_id': widget.empresaId, // <-- CARIMBO DE ISOLAMENTO APLICADO
       'atualizadoEm': FieldValue.serverTimestamp(),
     };
 
@@ -76,16 +83,20 @@ class _FormProdutoState extends State<FormProduto> {
         await _produtosRef.doc(widget.produtoId).update(dadosProduto);
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Produto salvo com sucesso!')),
-      );
-      Navigator.pop(context);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Produto salvo com sucesso!')),
+        );
+        Navigator.pop(context);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro ao salvar produto: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro ao salvar produto: $e')));
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -104,7 +115,6 @@ class _FormProdutoState extends State<FormProduto> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Campo: Referência / Código
                     TextFormField(
                       controller: _referenciaController,
                       decoration: const InputDecoration(
@@ -117,8 +127,6 @@ class _FormProdutoState extends State<FormProduto> {
                           : null,
                     ),
                     const SizedBox(height: 16),
-
-                    // Campo: Nome do Produto
                     TextFormField(
                       controller: _nomeController,
                       decoration: const InputDecoration(
@@ -131,8 +139,6 @@ class _FormProdutoState extends State<FormProduto> {
                           : null,
                     ),
                     const SizedBox(height: 16),
-
-                    // Dropdown: Tipo de Produto (Arquitetura Chave)
                     DropdownButtonFormField<String>(
                       value: _tipoSelecionado,
                       decoration: const InputDecoration(
@@ -152,8 +158,6 @@ class _FormProdutoState extends State<FormProduto> {
                           value == null ? 'Selecione o tipo do produto' : null,
                     ),
                     const SizedBox(height: 16),
-
-                    // Campo: Descrição
                     TextFormField(
                       controller: _descricaoController,
                       maxLines: 3,
@@ -164,8 +168,6 @@ class _FormProdutoState extends State<FormProduto> {
                       ),
                     ),
                     const SizedBox(height: 32),
-
-                    // Botão Salvar
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
