@@ -453,6 +453,23 @@ class _TelaGestaoUsuariosState extends State<TelaGestaoUsuarios> {
                   ),
                   onPressed: () async {
                     final email = emailCtrl.text.trim().toLowerCase();
+
+                    // TRAVA DE SEGURANÇA: Bloqueia palavras avulsas como "babaca"
+                    final bool emailValido = RegExp(
+                      r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+",
+                    ).hasMatch(email);
+                    if (!emailValido) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            '❌ Formato de e-mail inválido. O login deve terminar em @dominio.com',
+                          ),
+                          backgroundColor: Colors.redAccent,
+                        ),
+                      );
+                      return;
+                    }
+
                     final dadosFuncao =
                         funcaoSelecionadaDoc.data() as Map<String, dynamic>;
                     List<dynamic> modulosHerdados =

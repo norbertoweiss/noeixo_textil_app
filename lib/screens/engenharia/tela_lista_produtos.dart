@@ -95,8 +95,7 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
                             context,
                             MaterialPageRoute(
                               builder: (context) => FormProduto(
-                                empresaId: widget
-                                    .empresaId, // <-- CHAVE INJETADA NO BOTÃO EDITAR
+                                empresaId: widget.empresaId,
                                 produtoId: produto.id,
                                 dadosAtuais: data,
                               ),
@@ -122,10 +121,7 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => FormProduto(
-                empresaId:
-                    widget.empresaId, // <-- CHAVE INJETADA NO BOTÃO NOVO (+)
-              ),
+              builder: (context) => FormProduto(empresaId: widget.empresaId),
             ),
           );
         },

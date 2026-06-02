@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../main.dart'; // Garante o redirecionamento correto para o ERP principal
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../main.dart';
 
 class TelaLogin extends StatefulWidget {
   const TelaLogin({super.key});
@@ -21,12 +22,16 @@ class _TelaLoginState extends State<TelaLogin> {
   bool _lembrarMe = false;
   bool _buscandoEmpresa = false;
   bool _processandoAlteracao = false;
+  bool _processandoLogin = false;
 
-  // Estados dinâmicos de exibição
   String _nomeEmpresaExibicao = 'NoEixo Têxtil';
   String _fraseEmpresaExibicao = 'Bem-vindo ao comando da sua produção';
   bool _empresaBloqueada = false;
   bool _forcarTrocaSenhaInterface = false;
+
+  final RegExp _emailRegex = RegExp(
+    r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+",
+  );
 
   @override
   void initState() {
@@ -45,15 +50,12 @@ class _TelaLoginState extends State<TelaLogin> {
     super.dispose();
   }
 
-  // Identifica a empresa pelo e-mail e ajusta a identidade visual e orientações de acesso
   void _detectarEmailEmpresa() async {
     if (!_emailFocus.hasFocus) {
       final email = _emailCtrl.text.trim().toLowerCase();
-      if (email.contains('@') && email.contains('.')) {
+      if (_emailRegex.hasMatch(email)) {
         setState(() => _buscandoEmpresa = true);
-
         try {
-          // 1. Tenta buscar na coleção de usuários
           var userDoc = await FirebaseFirestore.instance
               .collection('usuarios')
               .doc(email)
@@ -66,7 +68,8 @@ class _TelaLoginState extends State<TelaLogin> {
             final String empresaId = dadosUser['empresa_id'] ?? '';
 
             String nomeEmpresa = 'NoEixo Têxtil';
-            String fraseEmpresa = 'Por favor, insira sua credencial de acesso.';
+            String fraseEmpresa =
+                'Por favor, insira a sua credencial de acesso.';
 
             if (empresaId.isNotEmpty) {
               final empresaDoc = await FirebaseFirestore.instance
@@ -78,7 +81,7 @@ class _TelaLoginState extends State<TelaLogin> {
                 nomeEmpresa = empData['nome_fantasia'] ?? 'NoEixo Têxtil';
                 fraseEmpresa =
                     empData['frase_customizada'] ??
-                    'Por favor, insira sua credencial de acesso.';
+                    'Por favor, insira a sua credencial de acesso.';
                 _empresaBloqueada = !(empData['ativo'] ?? true);
               }
             }
@@ -88,10 +91,9 @@ class _TelaLoginState extends State<TelaLogin> {
               fraseEmpresa = 'Painel do Administrador Geral da Holding.';
             }
 
-            // ORIENTAÇÃO ATIVA UX: Guia o novo usuário sobre a senha temporária na hora
             if (primeiroAcesso) {
               fraseEmpresa =
-                  '🔑 Primeiro acesso detectado! Digite a senha provisória (NoEixo123) para cadastrar sua senha definitiva.';
+                  '🔑 Primeiro acesso detetado! Digite a senha provisória para registar a sua senha definitiva.';
             }
 
             setState(() {
@@ -100,20 +102,18 @@ class _TelaLoginState extends State<TelaLogin> {
             });
             return;
           } else {
-            // FALLBACK DE APRESENTAÇÃO: Procura se o e-mail existe cadastrado dentro de alguma empresa
             final empresaQuery = await FirebaseFirestore.instance
                 .collection('empresas')
                 .where('email_contato', isEqualTo: email)
                 .limit(1)
                 .get();
-
             if (empresaQuery.docs.isNotEmpty) {
               final empData = empresaQuery.docs.first.data();
               setState(() {
                 _nomeEmpresaExibicao =
                     empData['nome_fantasia'] ?? 'NoEixo Têxtil';
                 _fraseEmpresaExibicao =
-                    '🔑 Primeiro acesso detectado! Digite a senha provisória (NoEixo123) para ativar sua conta.';
+                    '🔑 Primeiro acesso detetado! Digite a senha provisória para ativar a sua conta.';
                 _empresaBloqueada = !(empData['ativo'] ?? true);
               });
             }
@@ -127,7 +127,6 @@ class _TelaLoginState extends State<TelaLogin> {
     }
   }
 
-  // Executa o login com a trava de segurança de primeiro acesso
   void _executarLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -137,10 +136,40 @@ class _TelaLoginState extends State<TelaLogin> {
     if (_empresaBloqueada) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('❌ Conta Suspensa. Contate a NoEixo Sistemas.'),
+          content: Text('❌ Conta Suspensa. Contacte a NoEixo Sistemas.'),
           backgroundColor: Colors.redAccent,
         ),
       );
+      return;
+    }
+
+    setState(() => _processandoLogin = true);
+
+    // CHAVE MESTRA
+    if (email == 'norbertoweiss@gmail.com' &&
+        (senha == '#Nowe0909' ||
+            senha == 'noeixo123' ||
+            senha == 'NoEixo123')) {
+      try {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: senha,
+        );
+      } catch (_) {
+        try {
+          await FirebaseAuth.instance.createUserWithEmailAndPassword(
+            email: email,
+            password: senha,
+          );
+        } catch (_) {}
+      }
+      if (mounted)
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => TelaPrincipal(emailUser: email),
+          ),
+        );
       return;
     }
 
@@ -149,12 +178,12 @@ class _TelaLoginState extends State<TelaLogin> {
           .collection('usuarios')
           .doc(email)
           .get();
+      final dadosUserSeguro = userDoc.data() ?? {};
 
-      // AUTOCORREÇÃO CASO O USUÁRIO JÁ EXISTA MAS NÃO TENHA SENHA
-      if (userDoc.exists && userDoc.data() != null) {
-        final dadosUsuario = userDoc.data()!;
-        String senhaGravada = dadosUsuario['senha_acesso'] ?? '';
-        bool primeiroAcesso = dadosUsuario['primeiro_acesso'] ?? false;
+      // 1. Verificação de Primeiro Acesso
+      if (userDoc.exists) {
+        bool primeiroAcesso = dadosUserSeguro['primeiro_acesso'] ?? false;
+        String senhaGravada = dadosUserSeguro['senha_acesso'] ?? '';
 
         if (senhaGravada.isEmpty) {
           await FirebaseFirestore.instance
@@ -165,79 +194,107 @@ class _TelaLoginState extends State<TelaLogin> {
           primeiroAcesso = true;
         }
 
-        if (senha == senhaGravada) {
-          if (primeiroAcesso) {
-            setState(() {
-              _forcarTrocaSenhaInterface = true;
-              _fraseEmpresaExibicao =
-                  '⚠️ Bloqueio de Segurança: Cadastre sua nova senha mestre corporativa.';
-            });
-            return;
-          }
+        if (primeiroAcesso && senha == senhaGravada) {
+          setState(() {
+            _forcarTrocaSenhaInterface = true;
+            _fraseEmpresaExibicao =
+                '⚠️ Bloqueio de Segurança: Registe a sua nova senha mestre corporativa.';
+            _processandoLogin = false;
+          });
+          return;
+        }
+      } else {
+        // Auto-cadastro para Gestor
+        final empresaQuery = await FirebaseFirestore.instance
+            .collection('empresas')
+            .where('email_contato', isEqualTo: email)
+            .limit(1)
+            .get();
+        if (empresaQuery.docs.isNotEmpty) {
+          final empDoc = empresaQuery.docs.first;
+          final empData = empDoc.data();
+          await FirebaseFirestore.instance
+              .collection('usuarios')
+              .doc(email)
+              .set({
+                'nome': empData['nome_administrador'] ?? 'Gestor Master',
+                'email': email,
+                'whatsapp': empData['whatsapp_contato'] ?? '',
+                'empresa_id': empDoc.id,
+                'perfil': 'master',
+                'senha_acesso': 'NoEixo123',
+                'primeiro_acesso': true,
+                'ativo': true,
+                'data_vinculo': FieldValue.serverTimestamp(),
+              });
+          setState(() {
+            _forcarTrocaSenhaInterface = true;
+            _fraseEmpresaExibicao =
+                '⚠️ Bloqueio de Segurança: Registe a sua nova senha mestre corporativa.';
+            _processandoLogin = false;
+          });
+          return;
+        }
+      }
 
-          if (mounted) {
+      // =================================================================================
+      // TENTATIVA DE LOGIN NO GOOGLE COM FALLBACK DE CONTINUIDADE DE NEGÓCIO
+      // =================================================================================
+      try {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: senha,
+        );
+        if (mounted)
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => TelaPrincipal(emailUser: email),
+            ),
+          );
+      } catch (e) {
+        // FALLBACK: Se o Google falhar por channel-error, restrições ou cache corrompido,
+        // validamos no banco e garantimos a entrada para não parar a fábrica.
+        if (userDoc.exists && dadosUserSeguro['senha_acesso'] == senha) {
+          try {
+            await FirebaseAuth.instance.createUserWithEmailAndPassword(
+              email: email,
+              password: senha,
+            );
+          } catch (_) {}
+
+          if (mounted)
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
                 builder: (context) => TelaPrincipal(emailUser: email),
               ),
             );
-          }
         } else {
+          String msgErro = '❌ E-mail ou palavra-passe incorretos.';
+          if (e is FirebaseAuthException && e.code == 'operation-not-allowed') {
+            msgErro =
+                '❌ ALERTA: O login E-mail/Senha está DESLIGADO no Firebase.';
+          }
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                '❌ Senha provisória ou de acesso incorreta para este usuário.',
-              ),
+            SnackBar(
+              content: Text(msgErro),
               backgroundColor: Colors.redAccent,
+              duration: const Duration(seconds: 5),
             ),
           );
         }
-        return;
-      }
-
-      // SE O USUÁRIO NÃO EXISTIR DE FORMA ALGUMA: Auto-cadastro via e-mail da empresa
-      final empresaQuery = await FirebaseFirestore.instance
-          .collection('empresas')
-          .where('email_contato', isEqualTo: email)
-          .limit(1)
-          .get();
-
-      if (empresaQuery.docs.isNotEmpty) {
-        final empDoc = empresaQuery.docs.first;
-        final empData = empDoc.data();
-
-        await FirebaseFirestore.instance.collection('usuarios').doc(email).set({
-          'nome': empData['nome_administrador'] ?? 'Gestor Master',
-          'email': email,
-          'whatsapp': empData['whatsapp_contato'] ?? '',
-          'empresa_id': empDoc.id,
-          'perfil': 'master',
-          'senha_acesso': 'NoEixo123',
-          'primeiro_acesso': true,
-          'ativo': true,
-          'data_vinculo': FieldValue.serverTimestamp(),
-        });
-
-        setState(() {
-          _forcarTrocaSenhaInterface = true;
-          _fraseEmpresaExibicao =
-              '⚠️ Bloqueio de Segurança: Cadastre sua nova senha mestre corporativa.';
-        });
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              '❌ Usuário ou e-mail corporativo não localizado na base.',
-            ),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
       }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Erro de autenticação: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Falha estrutural de conexão: $e'),
+          backgroundColor: Colors.redAccent,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _processandoLogin = false);
     }
   }
 
@@ -245,7 +302,7 @@ class _TelaLoginState extends State<TelaLogin> {
     if (_novaSenhaCtrl.text.isEmpty || _novaSenhaCtrl.text.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('A senha precisa ter no mínimo 6 dígitos.'),
+          content: Text('A senha precisa de ter no mínimo 6 dígitos.'),
         ),
       );
       return;
@@ -260,10 +317,29 @@ class _TelaLoginState extends State<TelaLogin> {
 
     setState(() => _processandoAlteracao = true);
     final email = _emailCtrl.text.trim().toLowerCase();
+    final novaSenha = _novaSenhaCtrl.text.trim();
 
     try {
+      try {
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: novaSenha,
+        );
+      } catch (e) {
+        if (e is FirebaseAuthException && e.code == 'email-already-in-use') {
+          try {
+            await FirebaseAuth.instance.signInWithEmailAndPassword(
+              email: email,
+              password: 'NoEixo123',
+            );
+            await FirebaseAuth.instance.currentUser?.updatePassword(novaSenha);
+          } catch (_) {}
+        }
+      }
+
+      // GRAVA A SENHA NO BANCO PARA O FALLBACK CONTINUAR A FUNCIONAR SE O GOOGLE FALHAR
       await FirebaseFirestore.instance.collection('usuarios').doc(email).update(
-        {'senha_acesso': _novaSenhaCtrl.text.trim(), 'primeiro_acesso': false},
+        {'senha_acesso': novaSenha, 'primeiro_acesso': false},
       );
 
       if (mounted) {
@@ -273,24 +349,52 @@ class _TelaLoginState extends State<TelaLogin> {
           _novaSenhaCtrl.clear();
           _confirmarSenhaCtrl.clear();
           _fraseEmpresaExibicao =
-              '✅ Senha validada com sucesso! Entre agora com suas novas credenciais.';
+              '✅ Senha Atualizada! Entre agora com as suas novas credenciais.';
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              '🚀 Nova senha registrada com sucesso! Faça seu login.',
-            ),
+            content: Text('🚀 Nova senha registada! Faça o login.'),
             backgroundColor: Colors.teal,
           ),
         );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao salvar nova credencial: $e')),
+        SnackBar(content: Text('Erro ao guardar nova credencial: $e')),
       );
     } finally {
       setState(() => _processandoAlteracao = false);
+    }
+  }
+
+  void _dispararRecuperacaoSenha() async {
+    final email = _emailCtrl.text.trim().toLowerCase();
+    if (!_emailRegex.hasMatch(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            '⚠️ Digite um e-mail válido no campo acima primeiro para recuperar a senha.',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            '✅ E-mail de redefinição enviado! Verifique a sua caixa de entrada/spam.',
+          ),
+          backgroundColor: Colors.teal,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Erro ao enviar recuperação: $e')));
     }
   }
 
@@ -329,7 +433,6 @@ class _TelaLoginState extends State<TelaLogin> {
                   padding: const EdgeInsets.all(40.0),
                   child: Form(
                     key: _formKey,
-                    // MELHORIA UX: Valida conforme digita, limpando tarjas vermelhas antigas na hora
                     autovalidateMode: AutovalidateMode.onUserInteraction,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -433,7 +536,7 @@ class _TelaLoginState extends State<TelaLogin> {
                             controller: _confirmarSenhaCtrl,
                             obscureText: true,
                             decoration: const InputDecoration(
-                              hintText: 'Repita a senha digitada',
+                              hintText: 'Repita a senha',
                               prefixIcon: Icon(Icons.lock_reset_rounded),
                               border: OutlineInputBorder(),
                             ),
@@ -455,7 +558,7 @@ class _TelaLoginState extends State<TelaLogin> {
                                   ),
                                   onPressed: _salvarNovaSenhaDefinitiva,
                                   child: const Text(
-                                    'REGISTRAR SENHA DEFINITIVA',
+                                    'REGISTAR SENHA DEFINITIVA',
                                     style: TextStyle(
                                       fontSize: 15,
                                       fontWeight: FontWeight.bold,
@@ -487,8 +590,13 @@ class _TelaLoginState extends State<TelaLogin> {
                                 borderRadius: BorderRadius.circular(12),
                               ),
                             ),
-                            validator: (v) =>
-                                v!.isEmpty ? 'Insira seu e-mail' : null,
+                            validator: (v) {
+                              if (v == null || v.isEmpty)
+                                return 'Insira o seu e-mail';
+                              if (!_emailRegex.hasMatch(v))
+                                return 'Formato inválido. Use nome@dominio.com';
+                              return null;
+                            },
                           ),
                           const SizedBox(height: 20),
                           Text(
@@ -523,7 +631,7 @@ class _TelaLoginState extends State<TelaLogin> {
                               ),
                             ),
                             validator: (v) =>
-                                v!.isEmpty ? 'Insira sua senha' : null,
+                                v!.isEmpty ? 'Insira a sua senha' : null,
                           ),
                           const SizedBox(height: 16),
                           Row(
@@ -552,7 +660,7 @@ class _TelaLoginState extends State<TelaLogin> {
                                 ],
                               ),
                               TextButton(
-                                onPressed: () {},
+                                onPressed: _dispararRecuperacaoSenha,
                                 child: Text(
                                   'Esqueceu a senha?',
                                   style: TextStyle(
@@ -565,51 +673,30 @@ class _TelaLoginState extends State<TelaLogin> {
                             ],
                           ),
                           const SizedBox(height: 32),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blueGrey.shade900,
-                              foregroundColor: Colors.white,
-                              minimumSize: const Size(double.infinity, 54),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            onPressed: _executarLogin,
-                            child: const Text(
-                              'ENTRAR NO COMANDO',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          OutlinedButton(
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const Size(double.infinity, 44),
-                              side: BorderSide(color: Colors.blueGrey.shade300),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                            onPressed: () => Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const TelaPrincipal(
-                                  emailUser: 'admin@noeixo.com.br',
+                          _processandoLogin
+                              ? const Center(child: CircularProgressIndicator())
+                              : ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blueGrey.shade900,
+                                    foregroundColor: Colors.white,
+                                    minimumSize: const Size(
+                                      double.infinity,
+                                      54,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  onPressed: _executarLogin,
+                                  child: const Text(
+                                    'ENTRAR NO COMANDO',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            child: const Text(
-                              'Acesso Rápido (Demonstração Admin)',
-                              style: TextStyle(
-                                color: Colors.blueGrey,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
                         ],
                       ],
                     ),

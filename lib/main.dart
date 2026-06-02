@@ -4,36 +4,23 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'firebase_options.dart';
 
-// --- IMPORTAÇÕES DE CADASTROS E SUPRIMENTOS ---
 import 'screens/cadastros_base/tela_cadastros_base.dart';
 import 'screens/cadastros_base/tela_parametros_qualidade.dart';
 import 'screens/fornecedores/tela_fornecedores.dart';
 import 'screens/insumos/tela_abas_suprimentos.dart';
-
-// --- IMPORTAÇÕES DO ESTOQUE ---
 import 'screens/estoque/tela_entrada_conferencia.dart';
 import 'screens/estoque/tela_estoque_materia_prima.dart';
-
-// --- IMPORTAÇÃO DO FINANCEIRO ---
 import 'screens/financeiro/tela_financeiro_menu.dart';
-
-// --- IMPORTAÇÕES DA ENGENHARIA ---
 import 'screens/engenharia/tela_lista_processos.dart';
 import 'screens/engenharia/tela_lista_produtos.dart';
 import 'screens/engenharia/tela_lista_fichas.dart';
-
-// --- IMPORTAÇÕES DO COMERCIAL ---
 import 'screens/comercial/tela_carteira_clientes.dart';
 import 'screens/comercial/tela_gestao_regioes.dart';
 import 'screens/comercial/tela_cadastro_vendedor.dart';
-
-// --- IMPORTAÇÃO DA GESTÃO DO SISTEMA (NOEIXO) ---
+import 'screens/comercial/tela_catalogo_vendas.dart';
+import 'screens/comercial/tela_laboratorio_precos.dart'; // <-- IMPORT DA NOVA CENTRAL DE PREÇOS
 import 'gestao_sistema/telas/tela_dashboard_admin.dart';
-
-// --- IMPORTAÇÃO DO MÓDULO DE AUTENTICAÇÃO ---
 import 'screens/autenticacao/tela_login.dart';
-
-// --- IMPORTAÇÃO DO MÓDULO DE GESTÃO DE EQUIPE ---
 import 'screens/rh/tela_gestao_usuarios.dart';
 
 void main() async {
@@ -144,7 +131,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             context,
             todasAsAbas,
             true,
-            'HOLDING_DEV', // Trava de isolamento do desenvolvedor
+            'HOLDING_DEV',
             perfil,
             todasAsAbas,
           );
@@ -238,9 +225,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
         nomeChave: 'Engenharia',
         icone: Icons.architecture,
         tituloExibicao: 'Engenharia & Modelagem',
-        telaWidget: TelaEngenhariaMenu(
-          empresaId: empresaId,
-        ), // Chave conectada à Engenharia
+        telaWidget: TelaEngenhariaMenu(empresaId: empresaId),
       ),
       ModuloItem(
         nomeChave: 'PCP',
@@ -526,9 +511,7 @@ class TelaEngenhariaMenu extends StatelessWidget {
           'Fichas Técnicas',
           Icons.description,
           Colors.brown,
-          TelaListaFichas(
-            empresaId: empresaId,
-          ), // <-- A ÚLTIMA TRAVA DE ISOLAMENTO INJETADA AQUI!
+          TelaListaFichas(empresaId: empresaId),
         ),
         _botaoMenuResponsivo(
           context,
@@ -556,12 +539,28 @@ class TelaComercialMenu extends StatelessWidget {
       crossAxisSpacing: 15,
       mainAxisSpacing: 15,
       children: [
+        // <-- 1. BOTÃO DA CENTRAL DE PREÇOS (LABORATÓRIO) -->
+        _botaoMenuResponsivo(
+          context,
+          'Central de Preços',
+          Icons.request_quote,
+          Colors.amber.shade700, // Cor de alerta/gestão (Ouro)
+          TelaLaboratorioPrecos(empresaId: empresaId),
+        ),
+        // <-- 2. BOTÃO DO CATÁLOGO DE VENDAS -->
+        _botaoMenuResponsivo(
+          context,
+          'Catálogo de Vendas',
+          Icons.storefront,
+          Colors.deepOrange, // Destaque visual quente para vendas
+          TelaCatalogoVendas(empresaId: empresaId),
+        ),
         _botaoMenuResponsivo(
           context,
           'Carteira & CRM',
           Icons.badge,
           Colors.indigo,
-          const TelaCarteiraClientes(),
+          TelaCarteiraClientes(empresaId: empresaId),
         ),
         _botaoMenuResponsivo(
           context,

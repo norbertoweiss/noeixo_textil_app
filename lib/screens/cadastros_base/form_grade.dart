@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FormGrade extends StatefulWidget {
-  const FormGrade({super.key});
+  final DocumentSnapshot? gradeParaEditar;
+  const FormGrade({super.key, this.gradeParaEditar});
 
   @override
   State<FormGrade> createState() => _FormGradeState();
@@ -15,6 +16,17 @@ class _FormGradeState extends State<FormGrade> {
 
   List<String> _tamanhos = [];
   bool _salvando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Se recebeu uma grade, preenche os dados para edição
+    if (widget.gradeParaEditar != null) {
+      final d = widget.gradeParaEditar!.data() as Map<String, dynamic>;
+      _nomeController.text = d['nome'] ?? '';
+      _tamanhos = List<String>.from(d['tamanhos'] ?? []);
+    }
+  }
 
   void _adicionarTamanho() {
     if (_tamanhoController.text.isNotEmpty) {
@@ -29,8 +41,12 @@ class _FormGradeState extends State<FormGrade> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nova Grade de Tamanhos'),
-        backgroundColor: Colors.white, // Ajustado para o padrão visual do app
+        title: Text(
+          widget.gradeParaEditar == null
+              ? 'Nova Grade de Tamanhos'
+              : 'Editar Grade',
+        ),
+        backgroundColor: Colors.white,
         foregroundColor: Colors.blueGrey,
         elevation: 1,
       ),
@@ -131,23 +147,30 @@ class _FormGradeState extends State<FormGrade> {
                             setState(() => _salvando = true);
 
                             try {
-                              // GRAVA NA NUVEM FIREBASE (Sem devoluções locais)
-                              await FirebaseFirestore.instance
-                                  .collection('grades')
-                                  .add({
-                                    'clienteId': 'teste_textil',
-                                    'nome': _nomeController.text.trim(),
-                                    'tamanhos': _tamanhos,
-                                    'ativo': true,
-                                    'dataCadastro':
-                                        FieldValue.serverTimestamp(),
-                                  });
-
-                              if (mounted) {
-                                Navigator.pop(
-                                  context,
-                                ); // Apenas fecha a tela! O StreamBuilder na tela base faz o resto.
+                              if (widget.gradeParaEditar == null) {
+                                await FirebaseFirestore.instance
+                                    .collection('grades')
+                                    .add({
+                                      'clienteId': 'teste_textil',
+                                      'nome': _nomeController.text.trim(),
+                                      'tamanhos': _tamanhos,
+                                      'ativo': true,
+                                      'dataCadastro':
+                                          FieldValue.serverTimestamp(),
+                                    });
+                              } else {
+                                await FirebaseFirestore.instance
+                                    .collection('grades')
+                                    .doc(widget.gradeParaEditar!.id)
+                                    .update({
+                                      'nome': _nomeController.text.trim(),
+                                      'tamanhos': _tamanhos,
+                                      'dataAtualizacao':
+                                          FieldValue.serverTimestamp(),
+                                    });
                               }
+
+                              if (mounted) Navigator.pop(context);
                             } catch (e) {
                               if (mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
@@ -185,9 +208,11 @@ class _FormGradeState extends State<FormGrade> {
                             strokeWidth: 2,
                           ),
                         )
-                      : const Text(
-                          'CONFIRMAR GRADE',
-                          style: TextStyle(
+                      : Text(
+                          widget.gradeParaEditar == null
+                              ? 'CONFIRMAR GRADE'
+                              : 'ATUALIZAR GRADE',
+                          style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),

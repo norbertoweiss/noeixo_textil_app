@@ -4,9 +4,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
+import 'form_pedido_venda.dart';
 
 class TelaCarteiraClientes extends StatefulWidget {
-  const TelaCarteiraClientes({super.key});
+  final String empresaId; // <-- CHAVE MESTRA AGORA É RECEBIDA
+  const TelaCarteiraClientes({super.key, required this.empresaId});
 
   @override
   State<TelaCarteiraClientes> createState() => _TelaCarteiraClientesState();
@@ -36,8 +38,14 @@ class _TelaCarteiraClientesState extends State<TelaCarteiraClientes> {
         ),
         body: TabBarView(
           children: [
-            _AbaListaClientes(representanteId: _idRepresentanteLogado),
-            _AbaNovoClienteBalcao(representanteId: _idRepresentanteLogado),
+            _AbaListaClientes(
+              representanteId: _idRepresentanteLogado,
+              empresaId: widget.empresaId,
+            ),
+            _AbaNovoClienteBalcao(
+              representanteId: _idRepresentanteLogado,
+              empresaId: widget.empresaId,
+            ),
           ],
         ),
       ),
@@ -50,7 +58,11 @@ class _TelaCarteiraClientesState extends State<TelaCarteiraClientes> {
 // ============================================================================
 class _AbaListaClientes extends StatefulWidget {
   final String representanteId;
-  const _AbaListaClientes({required this.representanteId});
+  final String empresaId;
+  const _AbaListaClientes({
+    required this.representanteId,
+    required this.empresaId,
+  });
 
   @override
   State<_AbaListaClientes> createState() => _AbaListaClientesState();
@@ -66,7 +78,6 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
     return Scaffold(
       body: Column(
         children: [
-          // BARRA DE PESQUISA E FILTROS
           Container(
             padding: const EdgeInsets.all(12),
             color: Colors.white,
@@ -129,7 +140,6 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
             ),
           ),
 
-          // LISTA DE CLIENTES
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -150,8 +160,9 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
                   );
                 }
 
-                if (snapshot.connectionState == ConnectionState.waiting)
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
+                }
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return const Center(
                     child: Text(
@@ -161,7 +172,6 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
                   );
                 }
 
-                // APLICAÇÃO DOS FILTROS LOCAIS E ORDENAÇÃO NA MEMÓRIA
                 var docsFiltrados = snapshot.data!.docs.where((doc) {
                   var data = doc.data() as Map<String, dynamic>;
                   String razao = (data['razao_social'] ?? '')
@@ -180,8 +190,9 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
 
                   if (_filtroStatus == 'Rascunho' && !isRascunho) return false;
                   if (_filtroStatus != 'Todos' && _filtroStatus != 'Rascunho') {
-                    if (isRascunho || statusCredito != _filtroStatus)
+                    if (isRascunho || statusCredito != _filtroStatus) {
                       return false;
+                    }
                   }
 
                   return true;
@@ -301,26 +312,34 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
                         trailing: PopupMenuButton<String>(
                           onSelected: (val) {
                             if (val == 'pedido') {
+                              /*
                               if (statusCredito != 'Aprovado') {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Cliente sem crédito aprovado para pedidos.',
-                                    ),
-                                  ),
+                                  const SnackBar(content: Text('Cliente sem crédito aprovado para pedidos.')),
                                 );
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Abrir carrinho (Em Breve)'),
-                                  ),
-                                );
+                                return;
                               }
+                              */
+
+                              // --- O ERRO FOI CORRIGIDO AQUI. PASSA A CHAVE DINÂMICA ---
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => FormPedidoVenda(
+                                    empresaId: widget.empresaId,
+                                    clienteId: doc.id,
+                                    clienteNome:
+                                        data['razao_social'] ??
+                                        'Cliente Sem Nome',
+                                    regiao: data['grupo_economico'] ?? 'Geral',
+                                  ),
+                                ),
+                              );
                             }
-                            if (val == 'crm')
+                            if (val == 'crm') {
                               _modalCRM(context, doc.id, data['razao_social']);
+                            }
                             if (val == 'editar') {
-                              // O botão Editar também abre o Modo Carro, pois lá estão todos os dados do cliente
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
@@ -479,7 +498,11 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
 // ============================================================================
 class _AbaNovoClienteBalcao extends StatefulWidget {
   final String representanteId;
-  const _AbaNovoClienteBalcao({required this.representanteId});
+  final String empresaId;
+  const _AbaNovoClienteBalcao({
+    required this.representanteId,
+    required this.empresaId,
+  });
 
   @override
   State<_AbaNovoClienteBalcao> createState() => _AbaNovoClienteBalcaoState();
@@ -521,7 +544,7 @@ class _AbaNovoClienteBalcaoState extends State<_AbaNovoClienteBalcao> {
         final data = json.decode(response.body);
 
         if (data['descricao_situacao_cadastral'] != 'ATIVA') {
-          if (mounted)
+          if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
@@ -530,23 +553,25 @@ class _AbaNovoClienteBalcaoState extends State<_AbaNovoClienteBalcao> {
                 backgroundColor: Colors.red,
               ),
             );
+          }
         }
-
         setState(() {
           _dadosReceita = data;
           _cnpjValidado = true;
         });
       } else {
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('CNPJ não encontrado.')));
+        }
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Erro: $e')));
+      }
     } finally {
       setState(() => _buscandoCNPJ = false);
     }
@@ -561,6 +586,7 @@ class _AbaNovoClienteBalcaoState extends State<_AbaNovoClienteBalcao> {
           'representante_id': widget.representanteId,
           'status_credito': 'Pendente Enriquecimento',
           'data_criacao_rascunho': FieldValue.serverTimestamp(),
+          'empresa_id': widget.empresaId, // <-- CHAVE MESTRA SALVA AQUI TAMBÉM
 
           'cnpj': _cnpjCtrl.text.replaceAll(RegExp(r'[^0-9]'), ''),
           'razao_social': _dadosReceita['razao_social'] ?? '',
@@ -587,10 +613,11 @@ class _AbaNovoClienteBalcaoState extends State<_AbaNovoClienteBalcao> {
           _limparFormulario();
         }
       } catch (e) {
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text('Erro: $e')));
+        }
       } finally {
         if (mounted) setState(() => _salvando = false);
       }
@@ -777,9 +804,7 @@ class _TelaEnriquecimentoCarroState extends State<TelaEnriquecimentoCarro> {
 
   final _ieCtrl = TextEditingController();
 
-  // ARQUITETURA DINÂMICA: Lista de Locais de Entrega
   List<Map<String, dynamic>> _locaisEntrega = [];
-
   String? _fotoFachadaBase64;
   double? _latAtual;
   double? _lngAtual;
@@ -790,7 +815,6 @@ class _TelaEnriquecimentoCarroState extends State<TelaEnriquecimentoCarro> {
     super.initState();
     _ieCtrl.text = widget.dadosIniciais['inscricao_estadual'] ?? '';
 
-    // VERIFICA SE JÁ EXISTEM DADOS LOGÍSTICOS E CARREGA
     _isMesmoEndereco = widget.dadosIniciais['entrega_mesmo_fiscal'] ?? true;
     if (widget.dadosIniciais['locais_entrega'] != null) {
       _locaisEntrega = List<Map<String, dynamic>>.from(
@@ -799,7 +823,6 @@ class _TelaEnriquecimentoCarroState extends State<TelaEnriquecimentoCarro> {
     }
   }
 
-  // MOTOR DE GPS REAL (GEOLOCATOR)
   Future<void> _capturarGPS() async {
     setState(() => _isLoading = true);
     try {
@@ -851,7 +874,6 @@ class _TelaEnriquecimentoCarroState extends State<TelaEnriquecimentoCarro> {
     }
   }
 
-  // MODAL DINÂMICO PARA ADICIONAR OU EDITAR LOCAL DE ENTREGA
   void _modalEntrega({int? indexEdicao}) {
     final cepCtrl = TextEditingController();
     final ufCtrl = TextEditingController();
@@ -1007,11 +1029,10 @@ class _TelaEnriquecimentoCarroState extends State<TelaEnriquecimentoCarro> {
               };
 
               setState(() {
-                if (indexEdicao == null) {
+                if (indexEdicao == null)
                   _locaisEntrega.add(novoLocal);
-                } else {
+                else
                   _locaisEntrega[indexEdicao] = novoLocal;
-                }
               });
               Navigator.pop(context);
             },
@@ -1236,7 +1257,6 @@ class _TelaEnriquecimentoCarroState extends State<TelaEnriquecimentoCarro> {
                       ),
                     ),
 
-                    // ÁREA DINÂMICA DE MÚLTIPLOS LOCAIS DE ENTREGA
                     if (!_isMesmoEndereco) ...[
                       const SizedBox(height: 16),
                       const Text(

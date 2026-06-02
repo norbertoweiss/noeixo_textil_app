@@ -1,5 +1,8 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
 
 class FormProduto extends StatefulWidget {
   final String empresaId; // <-- CHAVE MESTRA RECEBIDA AQUI
@@ -29,9 +32,13 @@ class _FormProdutoState extends State<FormProduto> {
   String? _tipoSelecionado;
   bool _isLoading = false;
 
+  // --- MÓDULO FOTOGRÁFICO ---
+  Uint8List? _imagemBytes;
+  final ImagePicker _picker = ImagePicker();
+
   final List<String> _tiposProduto = [
     'Produto Intermediário', // A Peça Pai
-    'Produto Acabado', // A Peça Filha
+    'Produto Acabado', // A Peça Filha (Aparecerá no Catálogo)
   ];
 
   @override
@@ -46,8 +53,17 @@ class _FormProdutoState extends State<FormProduto> {
     _descricaoController = TextEditingController(
       text: widget.dadosAtuais?['descricao'] ?? '',
     );
-
     _tipoSelecionado = widget.dadosAtuais?['tipo'];
+
+    // Recuperar a foto existente, se houver
+    if (widget.dadosAtuais != null &&
+        widget.dadosAtuais!['fotoBase64'] != null) {
+      try {
+        _imagemBytes = base64Decode(widget.dadosAtuais!['fotoBase64']);
+      } catch (e) {
+        debugPrint('Erro ao descodificar imagem antiga: $e');
+      }
+    }
   }
 
   @override
@@ -58,54 +74,147 @@ class _FormProdutoState extends State<FormProduto> {
     super.dispose();
   }
 
-  Future<void> _salvarProduto() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-
-    // INJEÇÃO DA CHAVE: O sistema agora carimba a empresa dona do produto
-    final dadosProduto = {
-      'nome': _nomeController.text.trim(),
-      'referencia': _referenciaController.text.trim(),
-      'descricao': _descricaoController.text.trim(),
-      'tipo': _tipoSelecionado,
-      'empresa_id': widget.empresaId, // <-- CARIMBO DE ISOLAMENTO APLICADO
-      'atualizadoEm': FieldValue.serverTimestamp(),
-    };
-
+  // =========================================================================
+  // GESTÃO DE IMAGENS (CÂMARA / GALERIA) COM COMPRESSÃO
+  // =========================================================================
+  Future<void> _pegarImagem(ImageSource source) async {
     try {
-      if (widget.produtoId == null) {
-        // Novo registro
-        dadosProduto['criadoEm'] = FieldValue.serverTimestamp();
-        await _produtosRef.add(dadosProduto);
-      } else {
-        // Atualização
-        await _produtosRef.doc(widget.produtoId).update(dadosProduto);
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Produto salvo com sucesso!')),
-        );
-        Navigator.pop(context);
+      final XFile? pickedFile = await _picker.pickImage(
+        source: source,
+        maxWidth: 800, // Compressão 1: Limite de dimensão
+        maxHeight: 800, // Compressão 2: Limite de dimensão
+        imageQuality:
+            70, // Compressão 3: Qualidade (70% é ideal para web/mobile veloz)
+      );
+      if (pickedFile != null) {
+        final Uint8List bytes = await pickedFile.readAsBytes();
+        setState(() => _imagemBytes = bytes);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Erro ao salvar produto: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao capturar imagem: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  void _mostrarOpcoesImagem() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Wrap(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Colors.blueGrey),
+                title: const Text('Tirar Foto (Câmara)'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pegarImagem(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.photo_library,
+                  color: Colors.blueGrey,
+                ),
+                title: const Text('Procurar na Galeria'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pegarImagem(ImageSource.gallery);
+                },
+              ),
+              if (_imagemBytes != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_forever, color: Colors.red),
+                  title: const Text(
+                    'Remover Imagem',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    setState(() => _imagemBytes = null);
+                  },
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // =========================================================================
+  // SALVAR PRODUTO NO FIRESTORE
+  // =========================================================================
+  Future<void> _salvarProduto() async {
+    if (_formKey.currentState!.validate()) {
+      setState(() {
+        _isLoading = true;
+      });
+
+      try {
+        final dadosProduto = {
+          'empresa_id': widget.empresaId, // <-- CHAVE MESTRA GRAVADA
+          'nome': _nomeController.text.trim(),
+          'referencia': _referenciaController.text.trim(),
+          'tipo': _tipoSelecionado,
+          'descricao': _descricaoController.text.trim(),
+          'fotoBase64': _imagemBytes != null
+              ? base64Encode(_imagemBytes!)
+              : null,
+          'atualizadoEm': FieldValue.serverTimestamp(),
+        };
+
+        if (widget.produtoId == null) {
+          // Criação
+          dadosProduto['criadoEm'] = FieldValue.serverTimestamp();
+          await _produtosRef.add(dadosProduto);
+        } else {
+          // Edição
+          await _produtosRef.doc(widget.produtoId).update(dadosProduto);
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Produto salvo com sucesso!')),
+          );
+          Navigator.of(context).pop();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Erro ao salvar produto: $e')));
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+    }
+  }
+
+  // =========================================================================
+  // INTERFACE
+  // =========================================================================
   @override
   Widget build(BuildContext context) {
-    final isEdit = widget.produtoId != null;
-
     return Scaffold(
-      appBar: AppBar(title: Text(isEdit ? 'Editar Produto' : 'Novo Produto')),
+      appBar: AppBar(
+        title: Text(
+          widget.produtoId == null ? 'Novo Produto' : 'Editar Produto',
+        ),
+        centerTitle: true,
+      ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -115,37 +224,89 @@ class _FormProdutoState extends State<FormProduto> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // --- ÁREA DA FOTOGRAFIA ---
+                    Center(
+                      child: GestureDetector(
+                        onTap: _mostrarOpcoesImagem,
+                        child: Container(
+                          width: 160,
+                          height: 160,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.blueGrey.shade200,
+                              width: 2,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Colors.black12,
+                                blurRadius: 4,
+                                offset: Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: _imagemBytes != null
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Image.memory(
+                                    _imagemBytes!,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              : const Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.add_a_photo,
+                                      color: Colors.blueGrey,
+                                      size: 40,
+                                    ),
+                                    SizedBox(height: 8),
+                                    Text(
+                                      'Adicionar Foto\n(Catálogo)',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: Colors.blueGrey,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // --- CAMPOS DO FORMULÁRIO ---
                     TextFormField(
-                      controller: _referenciaController,
+                      controller: _nomeController,
                       decoration: const InputDecoration(
-                        labelText: 'Referência / Código',
+                        labelText: 'Nome do Produto *',
                         border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.qr_code),
                       ),
                       validator: (value) => value == null || value.isEmpty
-                          ? 'Informe a referência'
+                          ? 'O nome é obrigatório'
                           : null,
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
-                      controller: _nomeController,
+                      controller: _referenciaController,
                       decoration: const InputDecoration(
-                        labelText: 'Nome do Produto',
+                        labelText: 'Referência / Código *',
                         border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.inventory),
                       ),
                       validator: (value) => value == null || value.isEmpty
-                          ? 'Informe o nome do produto'
+                          ? 'A referência é obrigatória'
                           : null,
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
-                      value: _tipoSelecionado,
                       decoration: const InputDecoration(
-                        labelText: 'Tipo de Produto',
+                        labelText: 'Tipo de Produto *',
                         border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.account_tree),
                       ),
+                      value: _tipoSelecionado,
                       items: _tiposProduto.map((tipo) {
                         return DropdownMenuItem(value: tipo, child: Text(tipo));
                       }).toList(),
@@ -171,11 +332,16 @@ class _FormProdutoState extends State<FormProduto> {
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 16),
+                        backgroundColor: Colors.teal,
+                        foregroundColor: Colors.white,
                       ),
                       icon: const Icon(Icons.save),
                       label: const Text(
                         'Salvar Produto',
-                        style: TextStyle(fontSize: 16),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       onPressed: _salvarProduto,
                     ),

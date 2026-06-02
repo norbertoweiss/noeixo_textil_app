@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'form_ficha_tecnica.dart';
+import 'tela_ficha_tecnica_main.dart'; // <-- APONTAMENTO PARA O NOVO CÉREBRO
 
 class TelaListaFichas extends StatefulWidget {
-  final String empresaId; // <-- 1. CHAVE MESTRA RECEBIDA AQUI
+  final String empresaId;
 
   const TelaListaFichas({Key? key, required this.empresaId}) : super(key: key);
 
@@ -21,10 +21,8 @@ class _TelaListaFichasState extends State<TelaListaFichas> {
     return Scaffold(
       appBar: AppBar(title: const Text('Fichas Técnicas'), centerTitle: true),
       body: StreamBuilder<QuerySnapshot>(
-        // 2. TRAVA DE ISOLAMENTO: Filtra as fichas apenas para esta empresa
         stream: _fichasRef
             .where('empresa_id', isEqualTo: widget.empresaId)
-            .orderBy('criadoEm', descending: true)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -32,11 +30,10 @@ class _TelaListaFichasState extends State<TelaListaFichas> {
           }
 
           if (snapshot.hasError) {
-            // FORÇA O FLUTTER A CUSPIR O LINK DO ÍNDICE NO CONSOLE (F12) DO CHROME
-            print('🔥🔥🔥 LINK DO ÍNDICE FIREBASE AQUI: ${snapshot.error}');
-            return const Center(
+            return Center(
               child: Text(
-                'Erro ao carregar fichas. (Verifique o Console do F12)',
+                'Erro crítico: ${snapshot.error}',
+                style: const TextStyle(color: Colors.red),
               ),
             );
           }
@@ -49,7 +46,18 @@ class _TelaListaFichasState extends State<TelaListaFichas> {
             );
           }
 
-          final fichas = snapshot.data!.docs;
+          // ORDENAÇÃO NA MEMÓRIA (Da mais recente para a mais antiga)
+          final fichas = snapshot.data!.docs.toList();
+          fichas.sort((a, b) {
+            final dataA = a.data() as Map<String, dynamic>;
+            final dataB = b.data() as Map<String, dynamic>;
+            final timeA = dataA['criadoEm'] as Timestamp?;
+            final timeB = dataB['criadoEm'] as Timestamp?;
+            if (timeA == null && timeB == null) return 0;
+            if (timeA == null) return 1;
+            if (timeB == null) return -1;
+            return timeB.compareTo(timeA);
+          });
 
           return ListView.builder(
             itemCount: fichas.length,
@@ -71,12 +79,12 @@ class _TelaListaFichasState extends State<TelaListaFichas> {
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
+                    // --- GATILHO DE NAVEGAÇÃO PARA A EDIÇÃO (NOVO CÉREBRO) ---
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => FormFichaTecnica(
-                          empresaId: widget
-                              .empresaId, // <-- 3. CHAVE REPASSADA PARA O BOTÃO EDITAR
+                        builder: (context) => TelaFichaTecnicaMain(
+                          empresaId: widget.empresaId,
                           fichaId: ficha.id,
                           dadosAtuais: data,
                         ),
@@ -92,13 +100,12 @@ class _TelaListaFichasState extends State<TelaListaFichas> {
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.brown,
         onPressed: () {
+          // --- GATILHO DE NAVEGAÇÃO PARA NOVA FICHA (NOVO CÉREBRO) ---
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => FormFichaTecnica(
-                empresaId: widget
-                    .empresaId, // <-- 4. CHAVE REPASSADA PARA O BOTÃO NOVO (+)
-              ),
+              builder: (context) =>
+                  TelaFichaTecnicaMain(empresaId: widget.empresaId),
             ),
           );
         },

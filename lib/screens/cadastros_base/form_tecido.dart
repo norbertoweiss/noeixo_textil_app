@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class FormTecido extends StatefulWidget {
-  const FormTecido({super.key});
+  final DocumentSnapshot? tecidoParaEditar;
+  const FormTecido({super.key, this.tecidoParaEditar});
 
   @override
   State<FormTecido> createState() => _FormTecidoState();
@@ -27,7 +28,22 @@ class _FormTecidoState extends State<FormTecido> {
 
   bool _salvando = false;
 
-  // A MÁGICA DA FÍSICA TÊXTIL (Agora com setState para forçar a tela a piscar)
+  @override
+  void initState() {
+    super.initState();
+    // Se recebeu um tecido, preenche os dados para edição
+    if (widget.tecidoParaEditar != null) {
+      final d = widget.tecidoParaEditar!.data() as Map<String, dynamic>;
+      _nomeController.text = d['nome'] ?? '';
+      _composicaoController.text = d['composicao'] ?? '';
+      _tipoProcesso = d['tipoProcesso'] ?? 'Compra de Malha Tingida (Pronta)';
+      _gramaturaController.text = (d['gramatura'] ?? '').toString();
+      _larguraController.text = (d['largura'] ?? '').toString();
+      _rendimentoController.text = (d['rendimento'] ?? '').toString();
+      _custoController.text = (d['custoBase'] ?? '').toString();
+    }
+  }
+
   void _calcularRendimento() {
     double? gramatura = double.tryParse(
       _gramaturaController.text.replaceAll(',', '.'),
@@ -43,7 +59,7 @@ class _FormTecidoState extends State<FormTecido> {
       });
     } else {
       setState(() {
-        _rendimentoController.text = ''; // Limpa se apagar os valores
+        _rendimentoController.text = '';
       });
     }
   }
@@ -52,7 +68,11 @@ class _FormTecidoState extends State<FormTecido> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Novo Tecido / Malha'),
+        title: Text(
+          widget.tecidoParaEditar == null
+              ? 'Novo Tecido / Malha'
+              : 'Editar Tecido / Malha',
+        ),
         backgroundColor: Colors.blueGrey,
         foregroundColor: Colors.white,
       ),
@@ -117,8 +137,7 @@ class _FormTecidoState extends State<FormTecido> {
                           labelText: 'Gramatura (g/m²)',
                           border: OutlineInputBorder(),
                         ),
-                        onChanged: (value) =>
-                            _calcularRendimento(), // GATILHO ADICIONADO AQUI
+                        onChanged: (value) => _calcularRendimento(),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -132,8 +151,7 @@ class _FormTecidoState extends State<FormTecido> {
                           labelText: 'Largura (metros)',
                           border: OutlineInputBorder(),
                         ),
-                        onChanged: (value) =>
-                            _calcularRendimento(), // GATILHO ADICIONADO AQUI
+                        onChanged: (value) => _calcularRendimento(),
                       ),
                     ),
                   ],
@@ -203,10 +221,6 @@ class _FormTecidoState extends State<FormTecido> {
 
                               try {
                                 final db = FirebaseFirestore.instance;
-                                String idFinal = db
-                                    .collection('tecidos')
-                                    .doc()
-                                    .id;
 
                                 double rendimentoVal =
                                     double.tryParse(
@@ -241,21 +255,38 @@ class _FormTecidoState extends State<FormTecido> {
                                     ) ??
                                     0.0;
 
-                                await db
-                                    .collection('tecidos')
-                                    .doc(idFinal)
-                                    .set({
-                                      'id': idFinal,
-                                      'clienteId': 'teste_textil',
-                                      'nome': _nomeController.text,
-                                      'composicao': _composicaoController.text,
-                                      'tipoProcesso': _tipoProcesso,
-                                      'gramatura': gramaturaVal,
-                                      'rendimento': rendimentoVal,
-                                      'largura': larguraVal,
-                                      'custoBase': custoVal,
-                                      'ativo': true,
-                                    });
+                                final dados = {
+                                  'clienteId': 'teste_textil',
+                                  'nome': _nomeController.text,
+                                  'composicao': _composicaoController.text,
+                                  'tipoProcesso': _tipoProcesso,
+                                  'gramatura': gramaturaVal,
+                                  'rendimento': rendimentoVal,
+                                  'largura': larguraVal,
+                                  'custoBase': custoVal,
+                                };
+
+                                if (widget.tecidoParaEditar == null) {
+                                  // Novo
+                                  String idFinal = db
+                                      .collection('tecidos')
+                                      .doc()
+                                      .id;
+                                  dados['id'] = idFinal;
+                                  dados['ativo'] = true;
+                                  await db
+                                      .collection('tecidos')
+                                      .doc(idFinal)
+                                      .set(dados);
+                                } else {
+                                  // Atualizar
+                                  dados['dataAtualizacao'] =
+                                      FieldValue.serverTimestamp();
+                                  await db
+                                      .collection('tecidos')
+                                      .doc(widget.tecidoParaEditar!.id)
+                                      .update(dados);
+                                }
 
                                 if (mounted) {
                                   Navigator.pop(context, true);
@@ -278,11 +309,7 @@ class _FormTecidoState extends State<FormTecido> {
                                   );
                                 }
                               } finally {
-                                if (mounted) {
-                                  setState(() {
-                                    _salvando = false;
-                                  });
-                                }
+                                if (mounted) setState(() => _salvando = false);
                               }
                             }
                           },
@@ -298,9 +325,11 @@ class _FormTecidoState extends State<FormTecido> {
                               strokeWidth: 2,
                             ),
                           )
-                        : const Text(
-                            'GUARDAR TECIDO',
-                            style: TextStyle(
+                        : Text(
+                            widget.tecidoParaEditar == null
+                                ? 'GUARDAR TECIDO'
+                                : 'ATUALIZAR TECIDO',
+                            style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
                             ),

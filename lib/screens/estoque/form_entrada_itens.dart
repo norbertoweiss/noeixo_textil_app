@@ -32,71 +32,22 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
   final _qtdeController = TextEditingController();
   final _unitarioController = TextEditingController();
   final _totalController = TextEditingController();
+  final _pesquisaController = TextEditingController();
 
   final FocusNode _qtdeFocus = FocusNode();
   final FocusNode _unitarioFocus = FocusNode();
   final FocusNode _totalFocus = FocusNode();
 
-  List<DocumentSnapshot> _insumos = [];
-  List<DocumentSnapshot> _formasPagamento = [];
-  List<DocumentSnapshot> _condicoesPagamento = [];
-
-  bool _carregando = true;
+  List<Map<String, dynamic>> _insumosCadastrados = [];
+  bool _carregandoInsumos = true;
   bool _salvandoNota = false;
 
   @override
   void initState() {
     super.initState();
-    _inicializarDados();
-
-    _qtdeController.addListener(_onQtdeChanged);
-    _unitarioController.addListener(_onUnitarioChanged);
-    _totalController.addListener(_onTotalChanged);
-  }
-
-  Future<void> _inicializarDados() async {
-    var snapshotInsumos = await FirebaseFirestore.instance
-        .collection('insumos')
-        .where('clienteId', isEqualTo: 'teste_textil')
-        .where('ativo', isEqualTo: true)
-        .get();
-    var snapshotFormas = await FirebaseFirestore.instance
-        .collection('formas_pagamento')
-        .where('clienteId', isEqualTo: 'teste_textil')
-        .where('ativo', isEqualTo: true)
-        .get();
-    var snapshotCondicoes = await FirebaseFirestore.instance
-        .collection('condicoes_pagamento')
-        .where('clienteId', isEqualTo: 'teste_textil')
-        .where('ativo', isEqualTo: true)
-        .get();
-
+    _carregarInsumos();
     if (widget.documentoId != null) {
-      var docNota = await FirebaseFirestore.instance
-          .collection('entradas_estoque')
-          .doc(widget.documentoId)
-          .get();
-      if (docNota.exists) {
-        final dados = docNota.data() as Map<String, dynamic>;
-        _itensTemporarios = List<Map<String, dynamic>>.from(
-          dados['itens'] ?? [],
-        );
-      }
-    }
-
-    if (mounted) {
-      setState(() {
-        _insumos = snapshotInsumos.docs;
-        _formasPagamento = snapshotFormas.docs;
-        _condicoesPagamento = snapshotCondicoes.docs;
-
-        _insumos.sort(
-          (a, b) => a['nome'].toString().toLowerCase().compareTo(
-            b['nome'].toString().toLowerCase(),
-          ),
-        );
-        _carregando = false;
-      });
+      _carregarRascunho();
     }
   }
 
@@ -105,468 +56,180 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
     _qtdeController.dispose();
     _unitarioController.dispose();
     _totalController.dispose();
+    _pesquisaController.dispose();
     _qtdeFocus.dispose();
     _unitarioFocus.dispose();
     _totalFocus.dispose();
     super.dispose();
   }
 
-  double _parse(String valor) {
-    return double.tryParse(valor.replaceAll('.', '').replaceAll(',', '.')) ??
-        0.0;
-  }
+  // =========================================================================
+  // MOTOR DE BUSCA E INTEGRAÇÃO COM O CATÁLOGO
+  // =========================================================================
+  Future<void> _carregarInsumos() async {
+    try {
+      var snap = await FirebaseFirestore.instance
+          .collection('insumos')
+          .where('clienteId', isEqualTo: 'teste_textil')
+          .where('ativo', isEqualTo: true)
+          .get();
 
-  void _onQtdeChanged() {
-    if (_qtdeFocus.hasFocus) {
-      double q = _parse(_qtdeController.text);
-      double u = _parse(_unitarioController.text);
-      if (q > 0 && u > 0)
-        _totalController.text = (q * u).toStringAsFixed(2).replaceAll('.', ',');
-    }
-  }
+      List<Map<String, dynamic>> lista = [];
+      for (var doc in snap.docs) {
+        var dados = doc.data();
+        dados['id'] = doc.id;
+        lista.add(dados);
+      }
 
-  void _onUnitarioChanged() {
-    if (_unitarioFocus.hasFocus) {
-      double q = _parse(_qtdeController.text);
-      double u = _parse(_unitarioController.text);
-      if (q > 0 && u > 0)
-        _totalController.text = (q * u).toStringAsFixed(2).replaceAll('.', ',');
-    }
-  }
-
-  void _onTotalChanged() {
-    if (_totalFocus.hasFocus) {
-      double q = _parse(_qtdeController.text);
-      double t = _parse(_totalController.text);
-      if (q > 0 && t > 0)
-        _unitarioController.text = (t / q)
-            .toStringAsFixed(4)
-            .replaceAll('.', ',');
-    }
-  }
-
-  void _adicionarItemRascunho() {
-    if (_formKeyItem.currentState!.validate()) {
-      double qtde = _parse(_qtdeController.text);
-      double unit = _parse(_unitarioController.text);
-      double total = _parse(_totalController.text);
-
-      setState(() {
-        _itensTemporarios.add({
-          'tipo': _tipoLinha,
-          'insumoId': _insumoSelecionado,
-          'nomeInsumo': _nomeInsumoSelecionado,
-          'quantidade': qtde,
-          'valorUnitario': unit,
-          'valorTotal': total,
+      if (mounted) {
+        setState(() {
+          _insumosCadastrados = lista;
+          _carregandoInsumos = false;
         });
-        _insumoSelecionado = null;
-        _nomeInsumoSelecionado = '';
-        _qtdeController.clear();
-        _unitarioController.clear();
-        _totalController.clear();
-      });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _carregandoInsumos = false);
     }
   }
 
-  void _removerItem(int index) {
-    setState(() => _itensTemporarios.removeAt(index));
+  Future<void> _carregarRascunho() async {
+    try {
+      var doc = await FirebaseFirestore.instance
+          .collection('entradas_estoque')
+          .doc(widget.documentoId)
+          .get();
+      if (doc.exists) {
+        var dados = doc.data() as Map<String, dynamic>;
+        if (dados['itens'] != null) {
+          setState(() {
+            _itensTemporarios = List<Map<String, dynamic>>.from(dados['itens']);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar rascunho: $e');
+    }
   }
 
-  String _formatarData(DateTime data) {
-    return '${data.day.toString().padLeft(2, '0')}/${data.month.toString().padLeft(2, '0')}/${data.year}';
+  // =========================================================================
+  // MATEMÁTICA DA NOTA
+  // =========================================================================
+  void _calcularValores(String origem) {
+    double qtde =
+        double.tryParse(_qtdeController.text.replaceAll(',', '.')) ?? 0;
+    double unitario =
+        double.tryParse(_unitarioController.text.replaceAll(',', '.')) ?? 0;
+    double total =
+        double.tryParse(_totalController.text.replaceAll(',', '.')) ?? 0;
+
+    if (origem == 'unitario' && qtde > 0) {
+      _totalController.text = (qtde * unitario).toStringAsFixed(2);
+    } else if (origem == 'total' && qtde > 0) {
+      _unitarioController.text = (total / qtde).toStringAsFixed(4);
+    }
   }
 
-  // ==========================================
-  // O CÉREBRO: PAINEL FINANCEIRO DE PARCELAMENTO
-  // ==========================================
-  void _abrirPainelFinanceiro() {
-    if (_itensTemporarios.isEmpty) {
+  void _adicionarItemNaLista() {
+    if (!_formKeyItem.currentState!.validate()) return;
+    if (_tipoLinha == 'Insumo' && _insumoSelecionado == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Adicione pelo menos um item.'),
+          content: Text('Selecione um Insumo!'),
           backgroundColor: Colors.red,
         ),
       );
       return;
     }
 
-    double totalNota = _itensTemporarios.fold(
-      0,
-      (sum, item) => sum + item['valorTotal'],
-    );
-    if (totalNota <= 0) {
-      _salvarNotaFinal('Efetivada');
-      return;
-    }
+    setState(() {
+      _itensTemporarios.add({
+        'tipo': _tipoLinha,
+        'insumoId': _insumoSelecionado,
+        'nomeInsumo': _tipoLinha == 'Insumo'
+            ? _nomeInsumoSelecionado
+            : 'Serviço/Frete',
+        'quantidade':
+            double.tryParse(_qtdeController.text.replaceAll(',', '.')) ?? 0,
+        'valorUnitario':
+            double.tryParse(_unitarioController.text.replaceAll(',', '.')) ?? 0,
+        'valorTotal':
+            double.tryParse(_totalController.text.replaceAll(',', '.')) ?? 0,
+      });
 
-    String? formaSelecionada;
-    DocumentSnapshot? condicaoSelecionada;
-    int qtdeParcelas = 1;
-    DateTime dataPrimeiroVencimento = DateTime.now();
-    List<Map<String, dynamic>> parcelasGeradas = [];
-    final qtdeController = TextEditingController(text: '1');
+      // Limpa os campos para o próximo item
+      _insumoSelecionado = null;
+      _nomeInsumoSelecionado = '';
+      _pesquisaController.clear();
+      _qtdeController.clear();
+      _unitarioController.clear();
+      _totalController.clear();
+      _qtdeFocus.requestFocus();
+    });
+  }
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            void gerarParcelas() {
-              if (condicaoSelecionada == null || formaSelecionada == null)
-                return;
-              parcelasGeradas.clear();
-              double valorParcela = totalNota / qtdeParcelas;
+  void _removerItem(int index) {
+    setState(() {
+      _itensTemporarios.removeAt(index);
+    });
+  }
 
-              String unidade = condicaoSelecionada!['unidadeTempo'];
-              int intervalo = condicaoSelecionada!['intervalo'];
-
-              for (int i = 0; i < qtdeParcelas; i++) {
-                DateTime dataCalculada = dataPrimeiroVencimento;
-
-                // Motor de Recorrência Inteligente (Dias, Meses ou Anos)
-                if (unidade == 'Dias') {
-                  dataCalculada = dataPrimeiroVencimento.add(
-                    Duration(days: intervalo * i),
-                  );
-                } else if (unidade == 'Meses') {
-                  dataCalculada = DateTime(
-                    dataPrimeiroVencimento.year,
-                    dataPrimeiroVencimento.month + (intervalo * i),
-                    dataPrimeiroVencimento.day,
-                  );
-                } else if (unidade == 'Anos') {
-                  dataCalculada = DateTime(
-                    dataPrimeiroVencimento.year + (intervalo * i),
-                    dataPrimeiroVencimento.month,
-                    dataPrimeiroVencimento.day,
-                  );
-                }
-
-                parcelasGeradas.add({
-                  'vencimento': dataCalculada,
-                  'valor': valorParcela,
-                  'formaPagamentoId': formaSelecionada,
-                });
-              }
-            }
-
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
-                left: 20,
-                right: 20,
-                top: 20,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Lançamento Financeiro',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.teal,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Valor Total da Nota: R\$ ${totalNota.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const Divider(),
-
-                    DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(
-                        labelText: 'Forma de Pagamento',
-                        border: OutlineInputBorder(),
-                      ),
-                      value: formaSelecionada,
-                      items: _formasPagamento
-                          .map(
-                            (doc) => DropdownMenuItem(
-                              value: doc.id,
-                              child: Text(doc['nome']),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) => setModalState(() {
-                        formaSelecionada = v;
-                        gerarParcelas();
-                      }),
-                    ),
-                    const SizedBox(height: 12),
-
-                    DropdownButtonFormField<DocumentSnapshot>(
-                      decoration: const InputDecoration(
-                        labelText: 'Prazo / Condição',
-                        border: OutlineInputBorder(),
-                      ),
-                      value: condicaoSelecionada,
-                      items: _condicoesPagamento
-                          .map(
-                            (doc) => DropdownMenuItem(
-                              value: doc,
-                              child: Text(doc['nome']),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) => setModalState(() {
-                        condicaoSelecionada = v;
-                        gerarParcelas();
-                      }),
-                    ),
-                    const SizedBox(height: 12),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: qtdeController,
-                            decoration: const InputDecoration(
-                              labelText: 'Qtde Parcelas',
-                              border: OutlineInputBorder(),
-                            ),
-                            keyboardType: TextInputType.number,
-                            onChanged: (v) {
-                              int? num = int.tryParse(v);
-                              if (num != null && num > 0) {
-                                setModalState(() {
-                                  qtdeParcelas = num;
-                                  gerarParcelas();
-                                });
-                              }
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: InkWell(
-                            onTap: () async {
-                              DateTime? picked = await showDatePicker(
-                                context: context,
-                                initialDate: dataPrimeiroVencimento,
-                                firstDate: DateTime(2000),
-                                lastDate: DateTime(2101),
-                              );
-                              if (picked != null) {
-                                setModalState(() {
-                                  dataPrimeiroVencimento = picked;
-                                  gerarParcelas();
-                                });
-                              }
-                            },
-                            child: InputDecorator(
-                              decoration: const InputDecoration(
-                                labelText: '1º Vencimento',
-                                border: OutlineInputBorder(),
-                              ),
-                              child: Text(
-                                _formatarData(dataPrimeiroVencimento),
-                                style: const TextStyle(fontSize: 16),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 16),
-                    if (parcelasGeradas.isNotEmpty) ...[
-                      const Text(
-                        'Previsão de Pagamentos (Clique na data para editar):',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        height: 150,
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: parcelasGeradas.length,
-                          itemBuilder: (context, index) {
-                            final p = parcelasGeradas[index];
-                            return Card(
-                              color: Colors.teal.shade50,
-                              child: ListTile(
-                                leading: CircleAvatar(
-                                  backgroundColor: Colors.teal,
-                                  child: Text(
-                                    '${index + 1}',
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                ),
-                                title: InkWell(
-                                  onTap: () async {
-                                    // PERMITE EDITAR MANUALMENTE UMA DATA ESPECÍFICA (Ex: Caiu no domingo)
-                                    DateTime? picked = await showDatePicker(
-                                      context: context,
-                                      initialDate: p['vencimento'],
-                                      firstDate: DateTime(2000),
-                                      lastDate: DateTime(2101),
-                                    );
-                                    if (picked != null)
-                                      setModalState(
-                                        () =>
-                                            parcelasGeradas[index]['vencimento'] =
-                                                picked,
-                                      );
-                                  },
-                                  child: Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.edit_calendar,
-                                        size: 16,
-                                        color: Colors.teal,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        _formatarData(p['vencimento']),
-                                        style: const TextStyle(
-                                          decoration: TextDecoration.underline,
-                                          color: Colors.teal,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                trailing: Text(
-                                  'R\$ ${p['valor'].toStringAsFixed(2)}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                        icon: const Icon(Icons.check_circle),
-                        label: const Text(
-                          'CONFIRMAR NOTA E FINANCEIRO',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        onPressed: () {
-                          if (formaSelecionada == null ||
-                              condicaoSelecionada == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Selecione Forma e Prazo!'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                            return;
-                          }
-                          Navigator.pop(context); // Fecha painel financeiro
-                          _salvarNotaFinal(
-                            'Efetivada',
-                            parcelasGeradas,
-                          ); // Dispara a gravação em lote
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+  double get _somaTotalNota {
+    return _itensTemporarios.fold(
+      0.0,
+      (soma, item) => soma + (item['valorTotal'] ?? 0.0),
     );
   }
 
-  // ==========================================
-  // O GRAVADOR (BATCH) - ESTOQUE + FINANCEIRO
-  // ==========================================
-  Future<void> _salvarNotaFinal(
-    String status, [
-    List<Map<String, dynamic>>? parcelasFinanceiras,
-  ]) async {
+  // =========================================================================
+  // GRAVAÇÃO E EFETIVAÇÃO
+  // =========================================================================
+  Future<void> _salvarNotaFinal(String statusFinal) async {
+    if (_itensTemporarios.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Adicione pelo menos um item à nota.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _salvandoNota = true);
 
     try {
-      double valorTotalNota = _itensTemporarios.fold(
-        0,
-        (sum, item) => sum + item['valorTotal'],
-      );
+      final db = FirebaseFirestore.instance;
+      WriteBatch batch = db.batch();
 
-      final dadosNota = {
+      DocumentReference refNota;
+      if (widget.documentoId != null) {
+        refNota = db.collection('entradas_estoque').doc(widget.documentoId);
+      } else {
+        refNota = db.collection('entradas_estoque').doc();
+      }
+
+      batch.set(refNota, {
         'clienteId': 'teste_textil',
         'tipoDocumento': widget.tipoDocumento,
         'numeroDocumento': widget.numeroDocumento,
         'fornecedorId': widget.fornecedorId,
-        'status': status,
-        'dataRegistro': FieldValue.serverTimestamp(),
-        'valorTotal': valorTotalNota,
+        'valorTotal': _somaTotalNota,
         'itens': _itensTemporarios,
-      };
+        'status': statusFinal,
+        'dataRegistro': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
-      WriteBatch batch = FirebaseFirestore.instance.batch();
-
-      // 1. Grava a Capa da Nota
-      DocumentReference docNota = widget.documentoId == null
-          ? FirebaseFirestore.instance.collection('entradas_estoque').doc()
-          : FirebaseFirestore.instance
-                .collection('entradas_estoque')
-                .doc(widget.documentoId);
-
-      batch.set(docNota, dadosNota);
-
-      if (status == 'Efetivada') {
-        // 2. Atualiza o Estoque
+      // Se for EFETIVAR, dá entrada física no estoque
+      if (statusFinal == 'EFETIVADA') {
         for (var item in _itensTemporarios) {
           if (item['tipo'] == 'Insumo' && item['insumoId'] != null) {
-            DocumentReference docInsumo = FirebaseFirestore.instance
+            DocumentReference refInsumo = db
                 .collection('insumos')
                 .doc(item['insumoId']);
-            batch.update(docInsumo, {
+            batch.update(refInsumo, {
               'estoqueAtual': FieldValue.increment(item['quantidade']),
-              'custoBase': item['valorUnitario'], // Atualiza Ficha Técnica
-            });
-          }
-        }
-
-        // 3. Injeta no Contas a Pagar
-        if (parcelasFinanceiras != null) {
-          for (int i = 0; i < parcelasFinanceiras.length; i++) {
-            var parcela = parcelasFinanceiras[i];
-            DocumentReference docConta = FirebaseFirestore.instance
-                .collection('contas_a_pagar')
-                .doc();
-            batch.set(docConta, {
-              'clienteId': 'teste_textil',
-              'fornecedorId': widget.fornecedorId,
-              'entradaEstoqueId': docNota.id,
-              'numeroDocumento': widget.numeroDocumento,
-              'parcela': '${i + 1}/${parcelasFinanceiras.length}',
-              'dataEmissao': FieldValue.serverTimestamp(),
-              'dataVencimento': Timestamp.fromDate(parcela['vencimento']),
-              'valor': parcela['valor'],
-              'formaPagamentoId': parcela['formaPagamentoId'],
-              'status': 'Pendente',
+              'custoBase':
+                  item['valorUnitario'], // Atualiza o custo médio/base do insumo
+              'dataAtualizacao': FieldValue.serverTimestamp(),
             });
           }
         }
@@ -575,11 +238,14 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
       await batch.commit();
 
       if (mounted) {
-        Navigator.pop(context);
-        if (widget.documentoId == null) Navigator.pop(context);
+        Navigator.pop(context); // Volta para a tela principal
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Nota salva como $status!'),
+            content: Text(
+              statusFinal == 'EFETIVADA'
+                  ? 'Nota Efetivada! Estoque Atualizado.'
+                  : 'Rascunho Guardado!',
+            ),
             backgroundColor: Colors.green,
           ),
         );
@@ -597,92 +263,169 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
     }
   }
 
+  void _abrirPainelFinanceiro() {
+    // Este seria o popup para gerar as parcelas de contas a pagar antes de efetivar.
+    // Para simplificar o fluxo agora, efetivamos diretamente.
+    _salvarNotaFinal('EFETIVADA');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         title: Text(
-          widget.documentoId == null ? '2. Itens da Entrada' : 'Editar Itens',
+          'Itens: ${widget.numeroDocumento}',
+          style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.teal,
         foregroundColor: Colors.white,
       ),
-      body: _carregando
+      body: _carregandoInsumos
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
+                // ================= PAINEL DE DIGITAÇÃO =================
                 Container(
-                  padding: const EdgeInsets.all(16),
                   color: Colors.white,
+                  padding: const EdgeInsets.all(16),
                   child: Form(
                     key: _formKeyItem,
                     child: Column(
                       children: [
                         Row(
                           children: [
-                            Radio<String>(
-                              value: 'Insumo',
-                              groupValue: _tipoLinha,
-                              onChanged: (v) => setState(() => _tipoLinha = v!),
-                            ),
-                            const Text('Insumo'),
-                            Radio<String>(
-                              value: 'Serviço',
-                              groupValue: _tipoLinha,
-                              onChanged: (v) => setState(() => _tipoLinha = v!),
-                            ),
-                            const Text('Serviço'),
-                          ],
-                        ),
-                        Row(
-                          children: [
                             Expanded(
+                              flex: 2,
                               child: DropdownButtonFormField<String>(
                                 decoration: const InputDecoration(
-                                  labelText: 'Selecione o Item',
+                                  labelText: 'Tipo',
                                   border: OutlineInputBorder(),
+                                  isDense: true,
                                 ),
-                                value: _insumoSelecionado,
-                                isExpanded: true,
-                                items: _insumos
+                                value: _tipoLinha,
+                                items: ['Insumo', 'Serviço', 'Frete']
                                     .map(
-                                      (doc) => DropdownMenuItem(
-                                        value: doc.id,
-                                        child: Text(doc['nome']),
+                                      (e) => DropdownMenuItem(
+                                        value: e,
+                                        child: Text(e),
                                       ),
                                     )
                                     .toList(),
-                                onChanged: (v) {
-                                  setState(() {
-                                    _insumoSelecionado = v;
-                                    _nomeInsumoSelecionado = _insumos
-                                        .firstWhere(
-                                          (doc) => doc.id == v,
-                                        )['nome'];
-                                  });
-                                },
-                                validator: (v) =>
-                                    v == null ? 'Obrigatório' : null,
+                                onChanged: (v) =>
+                                    setState(() => _tipoLinha = v!),
                               ),
                             ),
                             const SizedBox(width: 8),
-                            IconButton.filled(
-                              onPressed: () async {
-                                await Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const FormInsumo(),
-                                  ),
-                                );
-                                _inicializarDados();
-                              },
-                              icon: const Icon(Icons.add),
-                              style: IconButton.styleFrom(
-                                backgroundColor: Colors.teal,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
+
+                            // O MOTOR PREDITIVO COM O "+" (A Mágica)
+                            Expanded(
+                              flex: 5,
+                              child: _tipoLinha != 'Insumo'
+                                  ? const SizedBox.shrink()
+                                  : Row(
+                                      children: [
+                                        Expanded(
+                                          child: Autocomplete<Map<String, dynamic>>(
+                                            optionsBuilder:
+                                                (
+                                                  TextEditingValue
+                                                  textEditingValue,
+                                                ) {
+                                                  if (textEditingValue
+                                                      .text
+                                                      .isEmpty)
+                                                    return const Iterable<
+                                                      Map<String, dynamic>
+                                                    >.empty();
+                                                  return _insumosCadastrados.where(
+                                                    (
+                                                      insumo,
+                                                    ) => (insumo['nome'] ?? '')
+                                                        .toString()
+                                                        .toLowerCase()
+                                                        .contains(
+                                                          textEditingValue.text
+                                                              .toLowerCase(),
+                                                        ),
+                                                  );
+                                                },
+                                            displayStringForOption: (option) =>
+                                                option['nome'] ?? '',
+                                            onSelected: (selection) {
+                                              setState(() {
+                                                _insumoSelecionado =
+                                                    selection['id'];
+                                                _nomeInsumoSelecionado =
+                                                    selection['nome'];
+                                              });
+                                              _qtdeFocus
+                                                  .requestFocus(); // Pula para a quantidade
+                                            },
+                                            fieldViewBuilder:
+                                                (
+                                                  context,
+                                                  controller,
+                                                  focusNode,
+                                                  onFieldSubmitted,
+                                                ) {
+                                                  if (controller.text !=
+                                                      _pesquisaController.text)
+                                                    controller.text =
+                                                        _pesquisaController
+                                                            .text;
+                                                  controller.addListener(() {
+                                                    _pesquisaController.text =
+                                                        controller.text;
+                                                  });
+
+                                                  return TextFormField(
+                                                    controller: controller,
+                                                    focusNode: focusNode,
+                                                    decoration: const InputDecoration(
+                                                      labelText:
+                                                          'Pesquisar Insumo...',
+                                                      border:
+                                                          OutlineInputBorder(),
+                                                      isDense: true,
+                                                      prefixIcon: Icon(
+                                                        Icons.search,
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        // O BOTÃO DE CADASTRO ON-THE-FLY
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            color: Colors.teal,
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
+                                          ),
+                                          child: IconButton(
+                                            icon: const Icon(
+                                              Icons.add,
+                                              color: Colors.white,
+                                            ),
+                                            tooltip: 'Cadastrar Novo Insumo',
+                                            onPressed: () async {
+                                              // Abre o "Camaleão" sem sair da nota!
+                                              await Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      const FormInsumo(),
+                                                ),
+                                              );
+                                              _carregarInsumos(); // Recarrega a lista para achar o que acabou de criar
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                             ),
                           ],
                         ),
@@ -690,71 +433,62 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                         Row(
                           children: [
                             Expanded(
-                              flex: 2,
                               child: TextFormField(
                                 controller: _qtdeController,
                                 focusNode: _qtdeFocus,
                                 decoration: const InputDecoration(
                                   labelText: 'Qtde',
                                   border: OutlineInputBorder(),
+                                  isDense: true,
                                 ),
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
+                                keyboardType: TextInputType.number,
+                                onChanged: (_) => _calcularValores('unitario'),
+                                validator: (v) => v!.isEmpty ? '*' : null,
                               ),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
-                              flex: 3,
                               child: TextFormField(
                                 controller: _unitarioController,
                                 focusNode: _unitarioFocus,
                                 decoration: const InputDecoration(
-                                  labelText: 'Unitário (R\$)',
+                                  labelText: 'V. Unit',
                                   border: OutlineInputBorder(),
+                                  isDense: true,
                                 ),
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
+                                keyboardType: TextInputType.number,
+                                onChanged: (_) => _calcularValores('unitario'),
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
+                            const SizedBox(width: 8),
                             Expanded(
                               child: TextFormField(
                                 controller: _totalController,
                                 focusNode: _totalFocus,
                                 decoration: const InputDecoration(
-                                  labelText: 'Total (R\$)',
+                                  labelText: 'Total Item',
                                   border: OutlineInputBorder(),
+                                  isDense: true,
+                                  filled: true,
+                                  fillColor: Colors.black12,
                                 ),
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
+                                keyboardType: TextInputType.number,
+                                onChanged: (_) => _calcularValores('total'),
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            ElevatedButton.icon(
-                              onPressed: _adicionarItemRascunho,
-                              icon: const Icon(
-                                Icons.add_shopping_cart,
-                                size: 16,
-                              ),
-                              label: const Text('Inserir'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.teal.shade50,
-                                foregroundColor: Colors.teal,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 18,
-                                  horizontal: 16,
+                            const SizedBox(width: 8),
+                            IconButton.filled(
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.blueGrey,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
+                              icon: const Icon(
+                                Icons.keyboard_return,
+                                color: Colors.white,
+                              ),
+                              onPressed: _adicionarItemNaLista,
                             ),
                           ],
                         ),
@@ -762,71 +496,109 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                     ),
                   ),
                 ),
-                const Divider(height: 1, thickness: 2),
-                Expanded(
-                  child: _itensTemporarios.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'Nenhum item na nota.',
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                        )
-                      : ListView.builder(
-                          itemCount: _itensTemporarios.length,
-                          itemBuilder: (context, index) {
-                            final item = _itensTemporarios[index];
-                            return Card(
-                              margin: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 6,
-                              ),
-                              child: ListTile(
-                                leading: Icon(
-                                  item['tipo'] == 'Insumo'
-                                      ? Icons.inventory_2
-                                      : Icons.build,
-                                  color: Colors.teal,
-                                ),
-                                title: Text(
-                                  item['nomeInsumo'],
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  'Qtde: ${item['quantidade']} | Total: R\$ ${item['valorTotal'].toStringAsFixed(2)}',
-                                ),
-                                trailing: IconButton(
-                                  icon: const Icon(
-                                    Icons.delete,
-                                    color: Colors.red,
-                                  ),
-                                  onPressed: () => _removerItem(index),
-                                ),
-                              ),
-                            );
-                          },
+
+                // ================= LISTA DE ITENS LANÇADOS =================
+                Container(
+                  width: double.infinity,
+                  color: Colors.teal.shade800,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 16,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${_itensTemporarios.length} Itens Lançados',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
                         ),
+                      ),
+                      Text(
+                        'TOTAL: R\$ ${_somaTotalNota.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          color: Colors.amber,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _itensTemporarios.length,
+                    itemBuilder: (context, index) {
+                      final item = _itensTemporarios[index];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.teal.shade50,
+                            child: Text(
+                              (index + 1).toString(),
+                              style: TextStyle(
+                                color: Colors.teal.shade800,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            item['nomeInsumo'],
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'Qtde: ${item['quantidade']} x R\$ ${item['valorUnitario']} = R\$ ${item['valorTotal']}',
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _removerItem(index),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                // ================= RODAPÉ DE AÇÕES =================
                 Container(
                   padding: const EdgeInsets.all(16),
                   color: Colors.white,
                   child: _salvandoNota
-                      ? const Center(child: CircularProgressIndicator())
+                      ? const Center(
+                          child: CircularProgressIndicator(color: Colors.teal),
+                        )
                       : Row(
                           children: [
                             Expanded(
                               child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                ),
                                 onPressed: () =>
                                     _salvarNotaFinal('Em Digitação'),
-                                child: const Text('GUARDAR RASCUNHO'),
+                                child: const Text(
+                                  'GUARDAR RASCUNHO',
+                                  style: TextStyle(
+                                    color: Colors.teal,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ),
                             ),
-                            const SizedBox(width: 10),
+                            const SizedBox(width: 12),
                             Expanded(
                               child: ElevatedButton(
-                                onPressed:
-                                    _abrirPainelFinanceiro, // <--- AQUI A MÁGICA ACONTECE
+                                onPressed: _abrirPainelFinanceiro,
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.teal,
                                   foregroundColor: Colors.white,
@@ -834,7 +606,10 @@ class _FormEntradaItensState extends State<FormEntradaItens> {
                                     vertical: 16,
                                   ),
                                 ),
-                                child: const Text('EFETIVAR NOTA'),
+                                child: const Text(
+                                  'EFETIVAR NOTA',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
                               ),
                             ),
                           ],

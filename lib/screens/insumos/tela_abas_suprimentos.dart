@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../fornecedores/tela_categorias_fornecedor.dart';
+import '../cadastros_base/tela_arvore_catalogo.dart'; // Importa a nossa árvore de 3 níveis!
 import 'tela_insumos.dart';
 
 class TelaAbasSuprimentos extends StatelessWidget {
@@ -15,8 +15,7 @@ class TelaAbasSuprimentos extends StatelessWidget {
             'Categorias & Insumos',
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
-          backgroundColor:
-              Colors.indigo, // Cor original do seu botão no dashboard
+          backgroundColor: Colors.indigo,
           foregroundColor: Colors.white,
           bottom: const TabBar(
             labelColor: Colors.white,
@@ -24,15 +23,16 @@ class TelaAbasSuprimentos extends StatelessWidget {
             indicatorColor: Colors.white,
             indicatorWeight: 3,
             tabs: [
-              Tab(icon: Icon(Icons.account_tree), text: 'Classes e Subclasses'),
+              // AGORA CHAMA A ÁRVORE DE CATEGORIAS
+              Tab(icon: Icon(Icons.account_tree), text: 'Árvore de Categorias'),
               Tab(icon: Icon(Icons.inventory_2), text: 'Catálogo de Insumos'),
             ],
           ),
         ),
         body: const TabBarView(
           children: [
-            // Importamos os ecrãs que já funcionam perfeitamente
-            TelaCategoriasFornecedor(),
+            // O motor de 3 níveis que criámos na etapa anterior
+            TelaArvoreCatalogo(),
             TelaInsumos(),
           ],
         ),
