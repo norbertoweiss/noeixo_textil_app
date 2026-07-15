@@ -13,6 +13,11 @@ import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
 import 'package:dio_cache_interceptor_hive_store/dio_cache_interceptor_hive_store.dart';
 
 // ============================================================================
+// INJEÇÃO DO GATILHO: MOTOR DE ROTEAMENTO
+// ============================================================================
+import '../../widgets/smart/motor_roteamento.dart';
+
+// ============================================================================
 // CACHE GLOBAL DE MAPAS (Evita bloqueio do OpenStreetMap e economiza dados)
 // ============================================================================
 CacheStore? _globalMapCacheStore;
@@ -331,10 +336,15 @@ class _TelaGestaoRegioesState extends State<TelaGestaoRegioes> {
                               Switch(
                                 value: isAtivo,
                                 activeColor: Colors.teal,
-                                onChanged: (val) => FirebaseFirestore.instance
-                                    .collection('regioes_venda')
-                                    .doc(doc.id)
-                                    .update({'ativo': val}),
+                                onChanged: (val) async {
+                                  await FirebaseFirestore.instance
+                                      .collection('regioes_venda')
+                                      .doc(doc.id)
+                                      .update({'ativo': val});
+
+                                  // Dispara o motor quando uma região é ativada/desativada
+                                  await MotorRoteamento.sincronizarGeral();
+                                },
                               ),
                               IconButton(
                                 icon: const Icon(
@@ -921,6 +931,12 @@ class _TelaEdicaoRegiaoState extends State<TelaEdicaoRegiao> {
             .doc(widget.regiaoId)
             .update(dados);
       }
+
+      // =======================================================================
+      // INJEÇÃO DA IGNIÇÃO AQUI: Executa a sincronização após salvar a região
+      // =======================================================================
+      await MotorRoteamento.sincronizarGeral();
+
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(

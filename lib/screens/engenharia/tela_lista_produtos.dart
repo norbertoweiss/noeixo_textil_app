@@ -16,6 +16,9 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
   final CollectionReference _produtosRef = FirebaseFirestore.instance
       .collection('produtos');
 
+  // Variável para armazenar o que o utilizador está a digitar
+  String _termoBusca = '';
+
   Future<void> _deletarProduto(String id) async {
     await _produtosRef.doc(id).delete();
     if (mounted) {
@@ -32,89 +35,140 @@ class _TelaListaProdutosState extends State<TelaListaProdutos> {
         title: const Text('Cadastro de Produtos'),
         centerTitle: true,
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: _produtosRef
-            .where('empresa_id', isEqualTo: widget.empresaId)
-            .orderBy('nome')
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (snapshot.hasError) {
-            print('🔥🔥🔥 LINK DO ÍNDICE FIREBASE AQUI: ${snapshot.error}');
-            return const Center(
-              child: Text(
-                'Erro ao carregar produtos. (Verifique o Console do F12)',
-              ),
-            );
-          }
-
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
-              child: Text('Nenhum produto cadastrado para esta empresa.'),
-            );
-          }
-
-          final produtos = snapshot.data!.docs;
-
-          return ListView.builder(
-            itemCount: produtos.length,
-            itemBuilder: (context, index) {
-              final produto = produtos[index];
-              final data = produto.data() as Map<String, dynamic>;
-
-              final isAcabado = data['tipo'] == 'Produto Acabado';
-
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: isAcabado
-                        ? Colors.green.shade100
-                        : Colors.blue.shade100,
-                    child: Icon(
-                      isAcabado ? Icons.checkroom : Icons.category,
-                      color: isAcabado
-                          ? Colors.green.shade800
-                          : Colors.blue.shade800,
-                    ),
-                  ),
-                  title: Text(data['nome'] ?? 'Sem nome'),
-                  subtitle: Text(
-                    'Ref: ${data['referencia']} | ${data['tipo']}',
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit, color: Colors.grey),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => FormProduto(
-                                empresaId: widget.empresaId,
-                                produtoId: produto.id,
-                                dadosAtuais: data,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.redAccent),
-                        onPressed: () =>
-                            _confirmarExclusao(context, produto.id),
-                      ),
-                    ],
-                  ),
+      body: Column(
+        children: [
+          // --- BARRA DE PESQUISA ---
+          Container(
+            padding: const EdgeInsets.all(12),
+            color: Colors.white,
+            child: TextField(
+              decoration: InputDecoration(
+                labelText: 'Buscar Produto (Nome ou Referência)...',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              );
-            },
-          );
-        },
+                isDense: true,
+              ),
+              onChanged: (val) {
+                setState(() {
+                  _termoBusca = val.toLowerCase();
+                });
+              },
+            ),
+          ),
+          const Divider(height: 1, thickness: 1),
+
+          // --- LISTA DE PRODUTOS ---
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _produtosRef
+                  .where('empresa_id', isEqualTo: widget.empresaId)
+                  .orderBy('nome')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                if (snapshot.hasError) {
+                  return const Center(
+                    child: Text(
+                      'Erro ao carregar produtos. (Verifique o Console)',
+                    ),
+                  );
+                }
+
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return const Center(
+                    child: Text('Nenhum produto cadastrado para esta empresa.'),
+                  );
+                }
+
+                // APLICA O FILTRO DA BUSCA ANTES DE RENDERIZAR
+                final produtosFiltrados = snapshot.data!.docs.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final nome = (data['nome'] ?? '').toString().toLowerCase();
+                  final ref = (data['referencia'] ?? '')
+                      .toString()
+                      .toLowerCase();
+
+                  return _termoBusca.isEmpty ||
+                      nome.contains(_termoBusca) ||
+                      ref.contains(_termoBusca);
+                }).toList();
+
+                if (produtosFiltrados.isEmpty) {
+                  return const Center(
+                    child: Text('Nenhum produto encontrado na pesquisa.'),
+                  );
+                }
+
+                return ListView.builder(
+                  itemCount: produtosFiltrados.length,
+                  itemBuilder: (context, index) {
+                    final produto = produtosFiltrados[index];
+                    final data = produto.data() as Map<String, dynamic>;
+
+                    final isAcabado = data['tipo'] == 'Produto Acabado';
+
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: isAcabado
+                              ? Colors.green.shade100
+                              : Colors.blue.shade100,
+                          child: Icon(
+                            isAcabado ? Icons.checkroom : Icons.category,
+                            color: isAcabado
+                                ? Colors.green.shade800
+                                : Colors.blue.shade800,
+                          ),
+                        ),
+                        title: Text(data['nome'] ?? 'Sem nome'),
+                        subtitle: Text(
+                          'Ref: ${data['referencia']} | ${data['tipo']}',
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.grey),
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => FormProduto(
+                                      empresaId: widget.empresaId,
+                                      produtoId: produto.id,
+                                      dadosAtuais: data,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.delete,
+                                color: Colors.redAccent,
+                              ),
+                              onPressed: () =>
+                                  _confirmarExclusao(context, produto.id),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {

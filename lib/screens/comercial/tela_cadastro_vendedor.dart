@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // IMPORT NECESSÁRIO PARA A CRIAÇÃO DO LOGIN
+
+// ============================================================================
+// INJEÇÃO DO GATILHO: MOTOR DE ROTEAMENTO
+// ============================================================================
+import '../../widgets/smart/motor_roteamento.dart';
 
 class TelaCadastroVendedor extends StatefulWidget {
   final String empresaId;
@@ -41,6 +47,53 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
         if (valor) setState(() => _filtroStatus = status);
       },
     );
+  }
+
+  // =========================================================================
+  // MÁQUINA DE GERAR ACESSO DO VENDEDOR (MURO DE VIDRO & TROCA DE SENHA)
+  // =========================================================================
+  Future<void> _gerarAcessoVendedorSeguro({
+    required String email,
+    required String nome,
+    required String whatsapp,
+    required String empresaId,
+  }) async {
+    final emailTratado = email.trim().toLowerCase();
+    if (emailTratado.isEmpty) return;
+
+    final db = FirebaseFirestore.instance;
+    final auth = FirebaseAuth.instance;
+
+    try {
+      // 1. Cria a Identidade no Firebase Auth
+      try {
+        await auth.createUserWithEmailAndPassword(
+          email: emailTratado,
+          password: 'NoEixo123',
+        );
+      } catch (e) {
+        // Ignora se o e-mail já existir no Auth, para garantir que o Firestore atualiza
+        if (e is FirebaseAuthException && e.code != 'email-already-in-use') {
+          rethrow;
+        }
+      }
+
+      // 2. Constrói o "Muro de Vidro" na coleção 'usuarios'
+      await db.collection('usuarios').doc(emailTratado).set({
+        'nome': nome,
+        'email': emailTratado,
+        'whatsapp': whatsapp,
+        'empresa_id': empresaId,
+        'perfil': 'vendedor',
+        'modulos_permitidos': ['Dashboard', 'Comercial'],
+        'primeiro_acesso': true,
+        'senha_acesso': 'NoEixo123',
+        'ativo': true,
+        'data_criacao': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Falha silenciosa ao gerar credenciais de acesso: $e');
+    }
   }
 
   @override
@@ -122,6 +175,7 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
                     final dados = doc.data() as Map<String, dynamic>;
 
                     final bool ativo = dados['ativo'] ?? true;
+                    final bool global = dados['atendimento_global'] ?? false;
                     final String tipo = dados['tipo_contratacao'] == 'clt'
                         ? 'CLT'
                         : 'Autônomo';
@@ -176,6 +230,27 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
                                 ),
                               ),
                             ),
+                            if (global) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.shade100,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'ACESSO GLOBAL',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.amber,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                         subtitle: Column(
@@ -229,6 +304,9 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
                                     .collection('vendedores')
                                     .doc(doc.id)
                                     .update({'ativo': v});
+
+                                // Dispara o motor também se ligar/desligar vendedor
+                                await MotorRoteamento.sincronizarGeral();
                               },
                             ),
                           ],
@@ -267,6 +345,8 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
     String tipoContratacao = dadosAlteracao?['tipo_contratacao'] ?? 'clt';
     String regimeClt = dadosAlteracao?['regime_clt'] ?? 'interno';
     String estruturaTrabalho = dadosAlteracao?['estrutura_trabalho'] ?? 'solo';
+
+    bool isAtendimentoGlobal = dadosAlteracao?['atendimento_global'] ?? false;
 
     List<String> regioesSelecionadas = List<String>.from(
       dadosAlteracao?['regioes_vinculadas'] ?? [],
@@ -496,7 +576,6 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
                       ),
                       const SizedBox(height: 24),
 
-                      // SEÇÃO 6 CORRIGIDA: Alinhada com a coleção 'regioes_venda' e o campo 'nome'
                       const Text(
                         '6. Abrangência Geográfica (Múltiplas Regiões)',
                         style: TextStyle(
@@ -506,11 +585,44 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
                         ),
                       ),
                       const SizedBox(height: 8),
+
+                      Card(
+                        elevation: 0,
+                        color: isAtendimentoGlobal
+                            ? Colors.amber.shade50
+                            : Colors.grey.shade50,
+                        shape: RoundedRectangleBorder(
+                          side: BorderSide(
+                            color: isAtendimentoGlobal
+                                ? Colors.amber.shade300
+                                : Colors.grey.shade300,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: SwitchListTile(
+                          title: const Text(
+                            'Acesso à Base Compartilhada (Bolsão)',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          subtitle: const Text(
+                            'Se ativo, o vendedor visualiza todos os clientes do sistema que não possuem dono.',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          activeColor: Colors.amber.shade700,
+                          value: isAtendimentoGlobal,
+                          onChanged: (val) {
+                            setStateDialog(() => isAtendimentoGlobal = val);
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
                       StreamBuilder<QuerySnapshot>(
                         stream: FirebaseFirestore.instance
-                            .collection(
-                              'regioes_venda',
-                            ) // Coleção correta sincronizada
+                            .collection('regioes_venda')
                             .snapshots(),
                         builder: (context, regSnapshot) {
                           if (regSnapshot.connectionState ==
@@ -522,8 +634,6 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
                           }
 
                           final regDocs = regSnapshot.data?.docs ?? [];
-
-                          // Filtra apenas as áreas com status ativo no Mapa Mestre
                           final regAtivas = regDocs.where((doc) {
                             final d = doc.data() as Map<String, dynamic>;
                             return d['ativo'] ?? true;
@@ -566,8 +676,7 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
                                 final regData =
                                     doc.data() as Map<String, dynamic>;
                                 final String nomeRegiaoText =
-                                    regData['nome'] ??
-                                    'Território Sem Nome'; // Chave correta ajustada
+                                    regData['nome'] ?? 'Território Sem Nome';
 
                                 bool selecionada = regioesSelecionadas.contains(
                                   nomeRegiaoText,
@@ -642,6 +751,7 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
                       'taxa_comissao': comissao,
                       'salario_base': tipoContratacao == 'clt' ? salario : 0.0,
                       'regioes_vinculadas': regioesSelecionadas,
+                      'atendimento_global': isAtendimentoGlobal,
                       'empresa_id': widget.empresaId,
                       'ativo': dadosAlteracao?['ativo'] ?? true,
                       'data_atualizacao': FieldValue.serverTimestamp(),
@@ -652,12 +762,27 @@ class _TelaCadastroVendedorState extends State<TelaCadastroVendedor> {
                       await FirebaseFirestore.instance
                           .collection('vendedores')
                           .add(payload);
+
+                      // DISPARA A MÁQUINA DE CRACHÁS SE O E-MAIL ESTIVER PREENCHIDO
+                      if (emailCtrl.text.trim().isNotEmpty) {
+                        await _gerarAcessoVendedorSeguro(
+                          email: emailCtrl.text,
+                          nome: nomeCtrl.text,
+                          whatsapp: whatsCtrl.text,
+                          empresaId: widget.empresaId,
+                        );
+                      }
                     } else {
                       await FirebaseFirestore.instance
                           .collection('vendedores')
                           .doc(docExistente.id)
                           .update(payload);
                     }
+
+                    // =======================================================================
+                    // INJEÇÃO DO GATILHO AQUI: Executa a sincronização após salvar o vendedor
+                    // =======================================================================
+                    await MotorRoteamento.sincronizarGeral();
 
                     if (context.mounted) Navigator.pop(context);
                   },

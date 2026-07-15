@@ -41,6 +41,14 @@ dependencies:
   youtube_player_flutter: ^9.1.3
   firebase_auth: ^6.5.1
 
+  # Motores de Geração de PDF e Impressão / Partilha
+  pdf: ^3.11.1
+  printing: ^5.13.0
+
+  # Leitor de arquivos CSV e Selecionador Visual (Para a Máquina de Importação)
+  csv: ^5.0.2
+  file_picker: any
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -63,3 +71,16 @@ flutter_launcher_icons:
 
 flutter:
   uses-material-design: true
+  
+  # DECLARAÇÃO DE ASSETS E FONTES LOCAIS (OFFLINE)
+  assets:
+    - assets/icon_noeixo.png
+    - assets/fonts/Roboto-Regular.ttf
+    - assets/fonts/Roboto-Bold.ttf
+
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+        - asset: assets/fonts/Roboto-Bold.ttf
+          weight: 700

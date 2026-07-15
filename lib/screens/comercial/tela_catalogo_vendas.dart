@@ -18,18 +18,25 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
   // Variáveis para a Gestão Dinâmica de Preços no Catálogo
   bool _isLoadingTabelas = true;
   List<Map<String, dynamic>> _tabelasDisponiveis = [];
-  String? _tabelaAtivaId; // A tabela que o vendedor selecionou
-  Map<String, double> _precosDaTabelaAtiva =
-      {}; // Memória cache dos preços reais
+  String? _tabelaAtivaId;
+  Map<String, double> _precosDaTabelaAtiva = {};
+
+  // --- CACHE DAS FICHAS TÉCNICAS E CORES ---
+  bool _isLoadingFichas = true;
+  bool _isLoadingCores = true;
+  Map<String, Map<String, dynamic>> _fichasCache = {};
+  Map<String, String> _coresImagensCache = {};
 
   @override
   void initState() {
     super.initState();
     _carregarTabelasDePreco();
+    _carregarFichasTecnicas();
+    _carregarCoresCache();
   }
 
   // =========================================================================
-  // 1. CARREGA AS TABELAS QUE O VENDEDOR PODE USAR
+  // CARREGA AS TABELAS QUE O VENDEDOR PODE USAR
   // =========================================================================
   Future<void> _carregarTabelasDePreco() async {
     try {
@@ -40,13 +47,17 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
 
       List<Map<String, dynamic>> lista = [];
       for (var doc in tabelasSnap.docs) {
-        lista.add({
-          'id': doc.id,
-          'nome': doc.data()['nome'] ?? 'Tabela sem nome',
-        });
+        bool isAtiva = doc.data().containsKey('ativa')
+            ? doc.data()['ativa']
+            : true;
+        if (isAtiva) {
+          lista.add({
+            'id': doc.id,
+            'nome': doc.data()['nome'] ?? 'Tabela sem nome',
+          });
+        }
       }
 
-      // Se houver tabelas, define a Padrão (se existir) ou a primeira como ativa inicial
       if (lista.isNotEmpty) {
         String tabelaInicial = lista.first['id'];
         for (var t in lista) {
@@ -59,7 +70,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
           _isLoadingTabelas = false;
         });
 
-        // Carrega os preços exatos da tabela selecionada
         await _buscarPrecosDaTabela(_tabelaAtivaId!);
       } else {
         setState(() => _isLoadingTabelas = false);
@@ -70,9 +80,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
     }
   }
 
-  // =========================================================================
-  // 2. BUSCA OS PREÇOS REAIS NO BANCO DE DADOS
-  // =========================================================================
   Future<void> _buscarPrecosDaTabela(String tabelaId) async {
     try {
       final itensSnap = await FirebaseFirestore.instance
@@ -87,41 +94,134 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
             double.tryParse(doc.data()['preco']?.toString() ?? '0') ?? 0.0;
       }
 
-      setState(() {
-        _precosDaTabelaAtiva = precosTemp;
-      });
+      setState(() => _precosDaTabelaAtiva = precosTemp);
     } catch (e) {
       debugPrint("Erro ao carregar itens da tabela: $e");
     }
   }
 
-  // Acionado quando o vendedor troca de tabela no Dropdown
   void _aoTrocarTabela(String novaTabelaId) {
     setState(() {
       _tabelaAtivaId = novaTabelaId;
-      // Zera os preços na tela até carregar a nova tabela
       _precosDaTabelaAtiva.clear();
     });
     _buscarPrecosDaTabela(novaTabelaId);
   }
 
   // =========================================================================
-  // MODAL DE LANÇAMENTO (COM O PREÇO REAL)
+  // CACHE DAS FICHAS TÉCNICAS E TEXTURAS DAS CORES
+  // =========================================================================
+  Future<void> _carregarFichasTecnicas() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('fichas_tecnicas')
+          .where('empresa_id', isEqualTo: widget.empresaId)
+          .get();
+
+      Map<String, Map<String, dynamic>> cacheTemp = {};
+      for (var doc in snap.docs) {
+        var data = doc.data();
+        if (data['produtoId'] != null) {
+          cacheTemp[data['produtoId']] = data;
+        }
+      }
+
+      setState(() {
+        _fichasCache = cacheTemp;
+        _isLoadingFichas = false;
+      });
+    } catch (e) {
+      debugPrint("Erro ao carregar Fichas: $e");
+      setState(() => _isLoadingFichas = false);
+    }
+  }
+
+  Future<void> _carregarCoresCache() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('cores').get();
+      Map<String, String> cacheTemp = {};
+
+      for (var doc in snap.docs) {
+        var data = doc.data();
+        if (data['nome'] != null &&
+            data['imagemBase64'] != null &&
+            data['imagemBase64'].toString().isNotEmpty) {
+          cacheTemp[data['nome'].toString()] = data['imagemBase64'].toString();
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _coresImagensCache = cacheTemp;
+          _isLoadingCores = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Erro ao carregar texturas das cores: $e");
+      if (mounted) setState(() => _isLoadingCores = false);
+    }
+  }
+
+  String _obterTecidoPrincipal(String produtoId) {
+    if (!_fichasCache.containsKey(produtoId)) return '';
+
+    List insumos = _fichasCache[produtoId]!['insumos'] ?? [];
+    if (insumos.isEmpty) return '';
+
+    for (var i in insumos) {
+      String nome = (i['insumoNome'] ?? i['nome'] ?? i['descricao'] ?? '')
+          .toString();
+      String tipo = (i['tipo'] ?? i['categoria'] ?? '')
+          .toString()
+          .toUpperCase();
+
+      if (tipo.contains('TECIDO') ||
+          tipo.contains('MALHA') ||
+          nome.toUpperCase().contains('MALHA') ||
+          nome.toUpperCase().contains('SUEDINE') ||
+          nome.toUpperCase().contains('COTTON') ||
+          nome.toUpperCase().contains('RIBANA')) {
+        return nome;
+      }
+    }
+
+    return (insumos.first['insumoNome'] ?? insumos.first['nome'] ?? '')
+        .toString();
+  }
+
+  // =========================================================================
+  // MODAL DE LANÇAMENTO
   // =========================================================================
   void _abrirMatrizLancamento(
     Map<String, dynamic> produto,
-    double precoAplicado,
+    double precoAplicadoTabela,
+    String produtoId,
   ) {
-    List<String> tamanhos = List<String>.from(
-      produto['tamanhos'] ?? ['P', 'M', 'G', 'GG'],
-    );
-    List<String> cores = List<String>.from(
-      produto['coresComerciais'] ?? ['Branco', 'Azul', 'Rosa'],
-    );
+    List<String> tamanhos = [];
+    List<String> cores = [];
+
+    if (_fichasCache.containsKey(produtoId)) {
+      tamanhos = List<String>.from(_fichasCache[produtoId]!['tamanhos'] ?? []);
+      cores = List<String>.from(
+        _fichasCache[produtoId]!['coresComerciais'] ?? [],
+      );
+    }
+
+    if (tamanhos.isEmpty) tamanhos = ['Único'];
+    if (cores.isEmpty) cores = ['Cor Única'];
 
     Map<String, Map<String, TextEditingController>> matrizControllers = {};
     int multiplicadorGrade = 0;
     bool sortidoPorCor = false;
+
+    // --- VARIÁVEIS DA CALCULADORA DE DESCONTO OCULTA ---
+    bool mostrarCalculadoraDesconto = false;
+    double precoNegociado = precoAplicadoTabela;
+    double percentualDesconto = 0.0;
+
+    // Deixamos os controladores vazios inicialmente para não forçar o vendedor a apagar
+    final TextEditingController percCtrl = TextEditingController();
+    final TextEditingController precoCtrl = TextEditingController();
 
     for (String cor in cores) {
       matrizControllers[cor] = {};
@@ -140,6 +240,74 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
+            Color getCorFundoDesconto() {
+              if (percentualDesconto <= 0) return Colors.grey.shade100;
+              if (percentualDesconto <= 10) return Colors.blue.shade50;
+              if (percentualDesconto <= 15) return Colors.amber.shade50;
+              if (percentualDesconto <= 20) return Colors.orange.shade50;
+              if (percentualDesconto <= 25) return Colors.red.shade50;
+              return Colors.deepPurple.shade50;
+            }
+
+            Color getCorTextoDesconto() {
+              if (percentualDesconto <= 0) return Colors.blueGrey;
+              if (percentualDesconto <= 10) return Colors.blue.shade900;
+              if (percentualDesconto <= 15) return Colors.amber.shade900;
+              if (percentualDesconto <= 20) return Colors.orange.shade900;
+              if (percentualDesconto <= 25) return Colors.red.shade900;
+              return Colors.deepPurple.shade900;
+            }
+
+            // ATUALIZAÇÃO BIDIRECIONAL COM CAMPOS "LIMPOS"
+            void aoMudarPercentual(String val) {
+              double perc = double.tryParse(val.replaceAll(',', '.')) ?? 0.0;
+              if (perc < 0) perc = 0;
+              double novoP = precoAplicadoTabela * (1 - (perc / 100));
+
+              setModalState(() {
+                percentualDesconto = perc;
+                precoNegociado = novoP;
+                // Atualiza o outro campo apenas se houver valor, senão deixa vazio
+                if (val.isEmpty || perc == 0) {
+                  precoCtrl.text = '';
+                } else {
+                  String novoPTxt = novoP.toStringAsFixed(2);
+                  if (precoCtrl.text != novoPTxt) {
+                    precoCtrl.text = novoPTxt;
+                    precoCtrl.selection = TextSelection.fromPosition(
+                      TextPosition(offset: precoCtrl.text.length),
+                    );
+                  }
+                }
+              });
+            }
+
+            void aoMudarPreco(String val) {
+              double preco =
+                  double.tryParse(val.replaceAll(',', '.')) ??
+                  precoAplicadoTabela;
+              double perc =
+                  ((precoAplicadoTabela - preco) / precoAplicadoTabela) * 100;
+              if (perc < 0) perc = 0;
+
+              setModalState(() {
+                precoNegociado = preco;
+                percentualDesconto = perc;
+
+                if (val.isEmpty || preco == precoAplicadoTabela) {
+                  percCtrl.text = '';
+                } else {
+                  String novoPercTxt = perc.toStringAsFixed(1);
+                  if (percCtrl.text != novoPercTxt) {
+                    percCtrl.text = novoPercTxt;
+                    percCtrl.selection = TextSelection.fromPosition(
+                      TextPosition(offset: percCtrl.text.length),
+                    );
+                  }
+                }
+              });
+            }
+
             double calcularTotal() {
               int totalPecas = 0;
               if (sortidoPorCor) {
@@ -153,7 +321,7 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                   ),
                 );
               }
-              return totalPecas * precoAplicado;
+              return totalPecas * precoNegociado;
             }
 
             void aplicarMultiplicadorGrade(int incremento) {
@@ -218,65 +386,282 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
               children: [
                 Padding(
                   padding: const EdgeInsets.all(16.0),
-                  child: Row(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              produto['nome'] ?? 'Sem Nome',
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blueGrey,
-                              ),
-                            ),
-                            // EXIBIÇÃO DO PREÇO OFICIAL DA TABELA AQUI
-                            Text(
-                              'Ref: ${produto['referencia'] ?? 'S/R'} | R\$ ${precoAplicado.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                color: Colors.teal,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
+                      Text(
+                        produto['nome'] ?? 'Sem Nome',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blueGrey,
                         ),
                       ),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.teal.shade50,
-                          borderRadius: BorderRadius.circular(30),
-                          border: Border.all(color: Colors.teal.shade200),
+                      Text(
+                        'Ref: ${produto['referencia'] ?? 'S/R'}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey,
+                          fontWeight: FontWeight.bold,
                         ),
-                        child: Row(
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      if (!mostrarCalculadoraDesconto)
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            IconButton(
-                              icon: const Icon(
-                                Icons.remove,
+                            Text(
+                              'R\$ ${precoAplicadoTabela.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
                                 color: Colors.teal,
                               ),
-                              onPressed: () => aplicarMultiplicadorGrade(-1),
-                            ),
-                            Text(
-                              '${multiplicadorGrade}x',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.teal.shade800,
-                              ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.add, color: Colors.teal),
-                              onPressed: () => aplicarMultiplicadorGrade(1),
+                              icon: const Icon(
+                                Icons.local_offer_outlined,
+                                color: Colors.grey,
+                                size: 22,
+                              ),
+                              tooltip: 'Negociar Preço da Peça',
+                              onPressed: () => setModalState(
+                                () => mostrarCalculadoraDesconto = true,
+                              ),
                             ),
                           ],
+                        )
+                      else
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: getCorFundoDesconto(),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: getCorTextoDesconto().withOpacity(0.3),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'Preço Original (Tabela):',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.blueGrey,
+                                    ),
+                                  ),
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'R\$ ${precoAplicadoTabela.toStringAsFixed(2)}',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.blueGrey,
+                                          decoration: percentualDesconto > 0
+                                              ? TextDecoration.lineThrough
+                                              : null,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      InkWell(
+                                        onTap: () {
+                                          setModalState(() {
+                                            percentualDesconto = 0.0;
+                                            precoNegociado =
+                                                precoAplicadoTabela;
+                                            percCtrl.clear();
+                                            precoCtrl.clear();
+                                            mostrarCalculadoraDesconto = false;
+                                          });
+                                        },
+                                        child: const Icon(
+                                          Icons.cancel,
+                                          size: 20,
+                                          color: Colors.redAccent,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const Divider(height: 16),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextFormField(
+                                      controller: percCtrl,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: getCorTextoDesconto(),
+                                      ),
+                                      decoration: InputDecoration(
+                                        labelText: 'Desconto (%)',
+                                        hintText:
+                                            '0.0', // <-- HINT EXIBIDO QUANDO VAZIO
+                                        labelStyle: TextStyle(
+                                          color: getCorTextoDesconto(),
+                                        ),
+                                        suffixIcon: Icon(
+                                          Icons.percent,
+                                          size: 16,
+                                          color: getCorTextoDesconto(),
+                                        ),
+                                        border: OutlineInputBorder(
+                                          borderSide: BorderSide(
+                                            color: getCorTextoDesconto(),
+                                          ),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderSide: BorderSide(
+                                            color: getCorTextoDesconto()
+                                                .withOpacity(0.5),
+                                          ),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderSide: BorderSide(
+                                            color: getCorTextoDesconto(),
+                                            width: 2,
+                                          ),
+                                        ),
+                                        isDense: true,
+                                      ),
+                                      onChanged: aoMudarPercentual,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: TextFormField(
+                                      controller: precoCtrl,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        color: getCorTextoDesconto(),
+                                      ),
+                                      decoration: InputDecoration(
+                                        labelText: 'Preço Final (R\$)',
+                                        hintText: precoAplicadoTabela
+                                            .toStringAsFixed(
+                                              2,
+                                            ), // <-- HINT EXIBIDO QUANDO VAZIO
+                                        labelStyle: TextStyle(
+                                          color: getCorTextoDesconto(),
+                                        ),
+                                        prefixText: 'R\$ ',
+                                        prefixStyle: TextStyle(
+                                          color: getCorTextoDesconto(),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        border: OutlineInputBorder(
+                                          borderSide: BorderSide(
+                                            color: getCorTextoDesconto(),
+                                          ),
+                                        ),
+                                        enabledBorder: OutlineInputBorder(
+                                          borderSide: BorderSide(
+                                            color: getCorTextoDesconto()
+                                                .withOpacity(0.5),
+                                          ),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderSide: BorderSide(
+                                            color: getCorTextoDesconto(),
+                                            width: 2,
+                                          ),
+                                        ),
+                                        isDense: true,
+                                      ),
+                                      onChanged: aoMudarPreco,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (percentualDesconto > 25)
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 8.0),
+                                  child: Text(
+                                    '⚠️ Bloqueado: Exige autorização da Diretoria.',
+                                    style: TextStyle(
+                                      color: Colors.deepPurple,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
+
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Aplicar quantidade rápida na grade:',
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.teal.shade50,
+                              borderRadius: BorderRadius.circular(30),
+                              border: Border.all(color: Colors.teal.shade200),
+                            ),
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.remove,
+                                    color: Colors.teal,
+                                    size: 18,
+                                  ),
+                                  onPressed: () =>
+                                      aplicarMultiplicadorGrade(-1),
+                                  constraints: const BoxConstraints(),
+                                  padding: const EdgeInsets.all(8),
+                                ),
+                                Text(
+                                  '${multiplicadorGrade}x',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.teal.shade800,
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.add,
+                                    color: Colors.teal,
+                                    size: 18,
+                                  ),
+                                  onPressed: () => aplicarMultiplicadorGrade(1),
+                                  constraints: const BoxConstraints(),
+                                  padding: const EdgeInsets.all(8),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
+
                 Expanded(
                   child: SingleChildScrollView(
                     child: Padding(
@@ -331,9 +716,21 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                   flex: 2,
                                   child: Row(
                                     children: [
-                                      CircleAvatar(
-                                        radius: 8,
-                                        backgroundColor: Colors.primaries[3],
+                                      Container(
+                                        width: 16,
+                                        height: 16,
+                                        decoration: const BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          gradient: SweepGradient(
+                                            colors: [
+                                              Colors.red,
+                                              Colors.blue,
+                                              Colors.yellow,
+                                              Colors.green,
+                                              Colors.red,
+                                            ],
+                                          ),
+                                        ),
                                       ),
                                       const SizedBox(width: 8),
                                       const Text(
@@ -367,66 +764,65 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                               ],
                             )
                           else
-                            ...cores
-                                .map(
-                                  (cor) => Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 4.0,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          flex: 2,
-                                          child: Row(
-                                            children: [
-                                              CircleAvatar(
-                                                radius: 8,
-                                                backgroundColor:
-                                                    Colors.grey.shade400,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  cor,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                            ],
+                            ...cores.map((cor) {
+                              String? base64Img = _coresImagensCache[cor];
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 4.0,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      flex: 2,
+                                      child: Row(
+                                        children: [
+                                          CircleAvatar(
+                                            radius: 8,
+                                            backgroundColor:
+                                                Colors.grey.shade300,
+                                            backgroundImage:
+                                                (base64Img != null &&
+                                                    base64Img.isNotEmpty)
+                                                ? MemoryImage(
+                                                    base64Decode(base64Img),
+                                                  )
+                                                : null,
                                           ),
-                                        ),
-                                        ...tamanhos.map(
-                                          (t) => Expanded(
-                                            flex: 1,
-                                            child: Padding(
-                                              padding: const EdgeInsets.all(
-                                                2.0,
-                                              ),
-                                              child: TextFormField(
-                                                controller:
-                                                    matrizControllers[cor]![t],
-                                                keyboardType:
-                                                    TextInputType.number,
-                                                textAlign: TextAlign.center,
-                                                decoration:
-                                                    const InputDecoration(
-                                                      border:
-                                                          OutlineInputBorder(),
-                                                      contentPadding:
-                                                          EdgeInsets.zero,
-                                                      isDense: true,
-                                                    ),
-                                                onChanged: (_) =>
-                                                    setModalState(() {}),
-                                              ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              cor,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                )
-                                .toList(),
+                                    ...tamanhos.map(
+                                      (t) => Expanded(
+                                        flex: 1,
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(2.0),
+                                          child: TextFormField(
+                                            controller:
+                                                matrizControllers[cor]![t],
+                                            keyboardType: TextInputType.number,
+                                            textAlign: TextAlign.center,
+                                            decoration: const InputDecoration(
+                                              border: OutlineInputBorder(),
+                                              contentPadding: EdgeInsets.zero,
+                                              isDense: true,
+                                            ),
+                                            onChanged: (_) =>
+                                                setModalState(() {}),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
                         ],
                       ),
                     ),
@@ -490,13 +886,65 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                               ),
                             ),
                             onPressed: () {
-                              Navigator.pop(context);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Item adicionado ao carrinho!'),
-                                  backgroundColor: Colors.green,
-                                ),
+                              List<Map<String, dynamic>> subItens = [];
+                              if (sortidoPorCor) {
+                                sortidoControllers.forEach((tam, ctrl) {
+                                  int qtd = int.tryParse(ctrl.text) ?? 0;
+                                  if (qtd > 0)
+                                    subItens.add({
+                                      'cor': 'Sortida',
+                                      'tamanho': tam,
+                                      'quantidade': qtd,
+                                    });
+                                });
+                              } else {
+                                matrizControllers.forEach((cor, tMap) {
+                                  tMap.forEach((tam, ctrl) {
+                                    int qtd = int.tryParse(ctrl.text) ?? 0;
+                                    if (qtd > 0)
+                                      subItens.add({
+                                        'cor': cor,
+                                        'tamanho': tam,
+                                        'quantidade': qtd,
+                                      });
+                                  });
+                                });
+                              }
+
+                              int qtdTotal = subItens.fold(
+                                0,
+                                (sum, i) => sum + (i['quantidade'] as int),
                               );
+
+                              if (qtdTotal == 0) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Informe a quantidade de pelo menos uma peça!',
+                                    ),
+                                    backgroundColor: Colors.orange,
+                                  ),
+                                );
+                                return;
+                              }
+
+                              Map<String, dynamic> itemParaCarrinho = {
+                                'idTemporario': DateTime.now()
+                                    .millisecondsSinceEpoch
+                                    .toString(),
+                                'produtoId': produtoId,
+                                'referencia': produto['referencia'] ?? 'S/R',
+                                'nome': produto['nome'] ?? 'Produto',
+                                'fotoBase64': produto['fotoBase64'],
+                                'precoTabela': precoAplicadoTabela,
+                                'precoVendido': precoNegociado,
+                                'quantidadeTotal': qtdTotal,
+                                'valorTotal': qtdTotal * precoNegociado,
+                                'gradeDistribuicao': subItens,
+                              };
+
+                              Navigator.pop(context);
+                              Navigator.pop(context, itemParaCarrinho);
                             },
                           ),
                         ),
@@ -556,17 +1004,11 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
         backgroundColor: Colors.teal,
         foregroundColor: Colors.white,
         elevation: 0,
-        actions: [
-          IconButton(icon: const Icon(Icons.shopping_cart), onPressed: () {}),
-        ],
       ),
-      body: _isLoadingTabelas
+      body: (_isLoadingTabelas || _isLoadingFichas || _isLoadingCores)
           ? const Center(child: CircularProgressIndicator(color: Colors.teal))
           : Column(
               children: [
-                // ===================================================================
-                // O PAINEL DE CONTEXTO DA VENDA (BUSCA + SELETOR DE TABELA)
-                // ===================================================================
                 Container(
                   color: Colors.teal,
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -652,9 +1094,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                   ),
                 ),
 
-                // ===================================================================
-                // O MOTOR DE EXIBIÇÃO DE PRODUTOS
-                // ===================================================================
                 Expanded(
                   child: StreamBuilder<QuerySnapshot>(
                     stream: FirebaseFirestore.instance
@@ -663,14 +1102,12 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                         .where('tipo', isEqualTo: 'Produto Acabado')
                         .snapshots(),
                     builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
+                      if (snapshot.connectionState == ConnectionState.waiting)
                         return const Center(child: CircularProgressIndicator());
-                      }
-                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
                         return const Center(
                           child: Text('Nenhum produto cadastrado.'),
                         );
-                      }
 
                       Set<String> categoriasUnicas = {'Todos'};
                       for (var doc in snapshot.data!.docs) {
@@ -707,7 +1144,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
 
                       return Column(
                         children: [
-                          // Abas Dinâmicas de Categoria (Bodys, Rompers, etc.)
                           SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
                             padding: const EdgeInsets.symmetric(
@@ -741,8 +1177,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                   .toList(),
                             ),
                           ),
-
-                          // Grade de Produtos
                           Expanded(
                             child: produtosFiltrados.isEmpty
                                 ? const Center(
@@ -764,15 +1198,18 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                           produtosFiltrados[index].data()
                                               as Map<String, dynamic>;
 
-                                      // BUSCA O PREÇO REAL NO MAPA EM MEMÓRIA
                                       double precoFinal =
                                           _precosDaTabelaAtiva[docId] ?? 0.0;
+                                      String tecidoInfo = _obterTecidoPrincipal(
+                                        docId,
+                                      );
 
                                       return GestureDetector(
                                         onTap: () => _abrirMatrizLancamento(
                                           data,
                                           precoFinal,
-                                        ), // Passa o preço real para a matriz
+                                          docId,
+                                        ),
                                         child: Card(
                                           elevation: 2,
                                           shape: RoundedRectangleBorder(
@@ -843,7 +1280,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                                           ],
                                                         ),
                                                         child: Text(
-                                                          // EXIBE O PREÇO REAL NA FOTO
                                                           precoFinal > 0
                                                               ? 'R\$ ${precoFinal.toStringAsFixed(2)}'
                                                               : 'Sob Consulta',
@@ -892,6 +1328,29 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                                         color: Colors.blueGrey,
                                                       ),
                                                     ),
+
+                                                    if (tecidoInfo.isNotEmpty)
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets.only(
+                                                              top: 4.0,
+                                                            ),
+                                                        child: Text(
+                                                          tecidoInfo,
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          style:
+                                                              const TextStyle(
+                                                                fontSize: 11,
+                                                                color: Colors
+                                                                    .indigo,
+                                                                fontStyle:
+                                                                    FontStyle
+                                                                        .italic,
+                                                              ),
+                                                        ),
+                                                      ),
                                                   ],
                                                 ),
                                               ),

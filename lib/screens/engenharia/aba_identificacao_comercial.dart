@@ -39,8 +39,6 @@ class _AbaIdentificacaoComercialState extends State<AbaIdentificacaoComercial> {
       final gradesSnap = await FirebaseFirestore.instance
           .collection('grades')
           .get();
-
-      // SOLUÇÃO: Busca irrestrita de cores para garantir compatibilidade com cadastros antigos
       final coresSnap = await FirebaseFirestore.instance
           .collection('cores')
           .get();
@@ -52,8 +50,6 @@ class _AbaIdentificacaoComercialState extends State<AbaIdentificacaoComercial> {
         _gradesList = gradesSnap.docs
             .map((d) => {'id': d.id, ...d.data()})
             .toList();
-
-        // Filtra localmente apenas as ativas (ou as que não têm o campo ativo definido, assumindo que são antigas e válidas)
         _listaCoresBase = coresSnap.docs
             .where((d) {
               var data = d.data();
@@ -65,10 +61,11 @@ class _AbaIdentificacaoComercialState extends State<AbaIdentificacaoComercial> {
         if (!silent) _carregandoBase = false;
       });
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Erro ao carregar base na Aba 1: $e')),
         );
+      }
       if (!silent) setState(() => _carregandoBase = false);
     }
   }
@@ -104,15 +101,17 @@ class _AbaIdentificacaoComercialState extends State<AbaIdentificacaoComercial> {
                   });
                   if (mounted) Navigator.pop(context);
                   _carregarDadosBase(silent: true);
-                  if (mounted)
+                  if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('$titulo criada com sucesso!')),
                     );
+                  }
                 } catch (e) {
-                  if (mounted)
+                  if (mounted) {
                     ScaffoldMessenger.of(
                       context,
                     ).showSnackBar(SnackBar(content: Text('Erro: $e')));
+                  }
                 }
               }
             },
@@ -123,10 +122,111 @@ class _AbaIdentificacaoComercialState extends State<AbaIdentificacaoComercial> {
     );
   }
 
+  // =========================================================================
+  // MOTOR DE PESQUISA MODAL DO PRODUTO (Substitui o Dropdown)
+  // =========================================================================
+  void _abrirModalPesquisaProduto() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        String termoPesquisaLocal = '';
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            // Filtra a lista de produtos na memória
+            var produtosFiltrados = _produtosList.where((p) {
+              final nome = (p['nome'] ?? '').toString().toLowerCase();
+              final ref = (p['referencia'] ?? '').toString().toLowerCase();
+              final busca = termoPesquisaLocal.toLowerCase();
+              return nome.contains(busca) || ref.contains(busca);
+            }).toList();
+
+            return AlertDialog(
+              title: const Text(
+                'Pesquisar Produto Base',
+                style: TextStyle(color: Colors.blueGrey),
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: MediaQuery.of(context).size.height * 0.6,
+                child: Column(
+                  children: [
+                    TextField(
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Buscar por nome ou referência...',
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (val) {
+                        setModalState(() {
+                          termoPesquisaLocal = val;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    Expanded(
+                      child: produtosFiltrados.isEmpty
+                          ? const Center(
+                              child: Text('Nenhum produto encontrado.'),
+                            )
+                          : ListView.builder(
+                              itemCount: produtosFiltrados.length,
+                              itemBuilder: (context, index) {
+                                var p = produtosFiltrados[index];
+                                return Card(
+                                  elevation: 1,
+                                  child: ListTile(
+                                    leading: const Icon(
+                                      Icons.checkroom,
+                                      color: Colors.teal,
+                                    ),
+                                    title: Text(p['nome'] ?? ''),
+                                    subtitle: Text(
+                                      'Ref: ${p['referencia'] ?? 'S/R'}',
+                                    ),
+                                    onTap: () {
+                                      setState(() {
+                                        widget.controller.produtoSelecionadoId =
+                                            p['id'];
+                                        widget.controller.produtoNome =
+                                            p['nome'];
+                                        widget.controller.referencia =
+                                            p['referencia'];
+                                        widget.controller.registrarAlteracao();
+                                      });
+                                      Navigator.pop(context); // Fecha o modal
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // =========================================================================
+  // INTERFACE PRINCIPAL
+  // =========================================================================
   @override
   Widget build(BuildContext context) {
-    if (_carregandoBase)
+    if (_carregandoBase) {
       return const Center(child: CircularProgressIndicator());
+    }
 
     Map<String, dynamic>? produtoDados;
     if (widget.controller.produtoSelecionadoId != null &&
@@ -136,6 +236,13 @@ class _AbaIdentificacaoComercialState extends State<AbaIdentificacaoComercial> {
           (p) => p['id'] == widget.controller.produtoSelecionadoId,
         );
       } catch (_) {}
+    }
+
+    // Define o texto que aparece no campo "falso dropdown" de Produto
+    String textoExibicaoProduto = 'Selecione um Produto...';
+    if (produtoDados != null) {
+      textoExibicaoProduto =
+          '[${produtoDados['referencia'] ?? 'S/R'}] ${produtoDados['nome']}';
     }
 
     return SingleChildScrollView(
@@ -150,46 +257,34 @@ class _AbaIdentificacaoComercialState extends State<AbaIdentificacaoComercial> {
           ),
           const SizedBox(height: 24),
 
-          // --- PRODUTO ---
+          // --- NOVO COMPONENTE: PESQUISA MODAL DE PRODUTO ---
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: DropdownButtonFormField<String>(
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Vincular Produto Base',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.inventory_2),
+                child: InkWell(
+                  onTap: _abrirModalPesquisaProduto,
+                  borderRadius: BorderRadius.circular(4),
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'Vincular Produto Base',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.inventory_2),
+                      suffixIcon: Icon(
+                        Icons.search,
+                      ), // Ícone indicando que é clicável para buscar
+                    ),
+                    child: Text(
+                      textoExibicaoProduto,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: widget.controller.produtoSelecionadoId == null
+                            ? Colors.grey.shade600
+                            : Colors.black87,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  value:
-                      _produtosList.any(
-                        (p) =>
-                            p['id'] == widget.controller.produtoSelecionadoId,
-                      )
-                      ? widget.controller.produtoSelecionadoId
-                      : null,
-                  items: _produtosList
-                      .map(
-                        (p) => DropdownMenuItem<String>(
-                          value: p['id'],
-                          child: Text(
-                            '${p['referencia'] ?? 'S/R'} - ${p['nome']}',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (val) {
-                    if (val == null) return;
-                    var p = _produtosList.firstWhere((e) => e['id'] == val);
-                    setState(() {
-                      widget.controller.produtoSelecionadoId = val;
-                      widget.controller.produtoNome = p['nome'];
-                      widget.controller.referencia = p['referencia'];
-                      widget.controller.registrarAlteracao();
-                    });
-                  },
                 ),
               ),
               const SizedBox(width: 8),
@@ -219,7 +314,7 @@ class _AbaIdentificacaoComercialState extends State<AbaIdentificacaoComercial> {
           ),
           const SizedBox(height: 16),
 
-          // --- GRADE ---
+          // --- GRADE (Mantido como Dropdown porque costumam ser poucas) ---
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

@@ -14,11 +14,11 @@ import 'screens/financeiro/tela_financeiro_menu.dart';
 import 'screens/engenharia/tela_lista_processos.dart';
 import 'screens/engenharia/tela_lista_produtos.dart';
 import 'screens/engenharia/tela_lista_fichas.dart';
-import 'screens/comercial/tela_carteira_clientes.dart';
-import 'screens/comercial/tela_gestao_regioes.dart';
-import 'screens/comercial/tela_cadastro_vendedor.dart';
-import 'screens/comercial/tela_catalogo_vendas.dart';
-import 'screens/comercial/tela_laboratorio_precos.dart'; // <-- IMPORT DA NOVA CENTRAL DE PREÇOS
+
+// O Módulo Comercial agora é importado limpo de um único ponto
+import 'screens/comercial/tela_comercial_menu.dart';
+import 'screens/comercial/tela_aprovacao_cliente.dart'; // Mantido para o link mágico
+
 import 'gestao_sistema/telas/tela_dashboard_admin.dart';
 import 'screens/autenticacao/tela_login.dart';
 import 'screens/rh/tela_gestao_usuarios.dart';
@@ -54,8 +54,52 @@ class NoEixoTextilApp extends StatelessWidget {
           foregroundColor: Colors.white,
         ),
       ),
-      home: const TelaLogin(),
       debugShowCheckedModeBanner: false,
+
+      // =========================================================================
+      // INTERCEPTADOR DE ROTA INICIAL (Bypass de Segurança para o Cliente)
+      // O 'home: const TelaLogin()' foi removido para evitar o conflito!
+      // =========================================================================
+      onGenerateInitialRoutes: (String initialRouteName) {
+        // 1. Se a pessoa chegou pelo link mágico do WhatsApp...
+        if (initialRouteName.startsWith('/aprovar')) {
+          final uri = Uri.parse(initialRouteName);
+          final idPedido = uri.queryParameters['id'];
+          final tokenValida = uri.queryParameters['token'];
+
+          if (idPedido != null && tokenValida != null) {
+            // Entrega APENAS a tela de aprovação. O Login não carrega por baixo.
+            return [
+              MaterialPageRoute(
+                builder: (context) => TelaAprovacaoCliente(
+                  pedidoId: idPedido,
+                  token: tokenValida,
+                ),
+              ),
+            ];
+          }
+        }
+
+        // 2. Se NÃO for o link de aprovação (acesso normal do funcionário), carrega a Tela de Login
+        return [MaterialPageRoute(builder: (context) => const TelaLogin())];
+      },
+
+      // Fallback de navegação interna mantido
+      onGenerateRoute: (settings) {
+        if (settings.name != null && settings.name!.startsWith('/aprovar')) {
+          final uri = Uri.parse(settings.name!);
+          final idPedido = uri.queryParameters['id'];
+          final tokenValida = uri.queryParameters['token'];
+
+          if (idPedido != null && tokenValida != null) {
+            return MaterialPageRoute(
+              builder: (context) =>
+                  TelaAprovacaoCliente(pedidoId: idPedido, token: tokenValida),
+            );
+          }
+        }
+        return null;
+      },
     );
   }
 }
@@ -519,62 +563,6 @@ class TelaEngenhariaMenu extends StatelessWidget {
           Icons.verified_outlined,
           Colors.deepPurple,
           const TelaParametrosQualidade(),
-        ),
-      ],
-    );
-  }
-}
-
-class TelaComercialMenu extends StatelessWidget {
-  final String empresaId;
-  const TelaComercialMenu({super.key, required this.empresaId});
-
-  @override
-  Widget build(BuildContext context) {
-    double largura = MediaQuery.of(context).size.width;
-    int colunas = largura > 800 ? 4 : 2;
-    return GridView.count(
-      padding: const EdgeInsets.all(20),
-      crossAxisCount: colunas,
-      crossAxisSpacing: 15,
-      mainAxisSpacing: 15,
-      children: [
-        // <-- 1. BOTÃO DA CENTRAL DE PREÇOS (LABORATÓRIO) -->
-        _botaoMenuResponsivo(
-          context,
-          'Central de Preços',
-          Icons.request_quote,
-          Colors.amber.shade700, // Cor de alerta/gestão (Ouro)
-          TelaLaboratorioPrecos(empresaId: empresaId),
-        ),
-        // <-- 2. BOTÃO DO CATÁLOGO DE VENDAS -->
-        _botaoMenuResponsivo(
-          context,
-          'Catálogo de Vendas',
-          Icons.storefront,
-          Colors.deepOrange, // Destaque visual quente para vendas
-          TelaCatalogoVendas(empresaId: empresaId),
-        ),
-        _botaoMenuResponsivo(
-          context,
-          'Carteira & CRM',
-          Icons.badge,
-          Colors.indigo,
-          TelaCarteiraClientes(empresaId: empresaId),
-        ),
-        _botaoMenuResponsivo(
-          context,
-          'Regiões & Territórios',
-          Icons.map,
-          Colors.deepPurple,
-          const TelaGestaoRegioes(),
-        ),
-        _botaoMenuResponsivo(
-          context,
-          'Cadastro de Vendedores',
-          Icons.badge_outlined,
-          Colors.teal,
-          TelaCadastroVendedor(empresaId: empresaId),
         ),
       ],
     );

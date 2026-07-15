@@ -1,12 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../comercial/tela_catalogo_vendas.dart';
+import 'tela_preview_pedido_pdf.dart';
 
 class FormPedidoVenda extends StatefulWidget {
   final String empresaId;
   final String clienteId;
   final String clienteNome;
   final String regiao;
+  final String whatsappCliente; // <-- NOVO: Recebe direto da Carteira
 
   const FormPedidoVenda({
     super.key,
@@ -14,6 +18,7 @@ class FormPedidoVenda extends StatefulWidget {
     required this.clienteId,
     required this.clienteNome,
     required this.regiao,
+    this.whatsappCliente = '', // <-- NOVO
   });
 
   @override
@@ -21,43 +26,83 @@ class FormPedidoVenda extends StatefulWidget {
 }
 
 class _FormPedidoVendaState extends State<FormPedidoVenda> {
-  final _formKeyPedido = GlobalKey<FormState>();
   final bool _isAdmin = true;
 
   String _tipoVenda = 'PRONTA ENTREGA';
   List<Map<String, dynamic>> _carrinhoItens = [];
 
-  List<DocumentSnapshot> _produtosAcabados = [];
-  String? _produtoSelecionadoId;
-  Map<String, dynamic>? _produtoSelecionadoDados;
+  bool _preparandoPedido = false;
 
-  List<String> _tamanhosDisponiveis = [];
-  List<String> _coresDisponiveis = []; // AGORA AS CORES SÃO DINÂMICAS!
-  String? _corSelecionada;
+  final TextEditingController _descontoExtraCtrl = TextEditingController(
+    text: '0.0',
+  );
+  double _descontoExtraPerc = 0.0;
+  bool _mostrarComissao = false;
 
-  final Map<String, TextEditingController> _gradeControllers = {};
-
-  bool _carregandoProdutos = true;
-  bool _salvandoPedido = false;
-
-  // --- MOTOR DE SOFT ALLOCATION (RESERVA DE 3 HORAS) ---
   DateTime? _tempoExpiracao;
   Timer? _cronometro;
   String _tempoRestanteStr = "03:00:00";
 
+  List<Map<String, dynamic>> _listaFormasPagamento = [];
+  List<Map<String, dynamic>> _listaCondicoesPagamento = [];
+  String? _formaPagamentoSelecionada;
+  String? _condicaoPagamentoSelecionada;
+  DateTime? _dataPrevistaEntrega;
+
   @override
   void initState() {
     super.initState();
-    _carregarProdutosAcabados();
+    _carregarDadosFinanceiros();
   }
 
   @override
   void dispose() {
     _cronometro?.cancel();
-    for (var ctrl in _gradeControllers.values) {
-      ctrl.dispose();
-    }
+    _descontoExtraCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _carregarDadosFinanceiros() async {
+    try {
+      final db = FirebaseFirestore.instance;
+      final formasSnap = await db
+          .collection('formas_pagamento')
+          .where('ativo', isEqualTo: true)
+          .get();
+      final condicoesSnap = await db
+          .collection('condicoes_pagamento')
+          .where('ativo', isEqualTo: true)
+          .get();
+
+      if (mounted) {
+        setState(() {
+          _listaFormasPagamento = formasSnap.docs
+              .map((doc) => {'id': doc.id, ...doc.data()})
+              .toList();
+          _listaCondicoesPagamento = condicoesSnap.docs
+              .map((doc) => {'id': doc.id, ...doc.data()})
+              .toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar financeiro: $e');
+    }
+  }
+
+  Future<void> _selecionarDataEntrega() async {
+    final DateTime? escolhida = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (escolhida != null && mounted) {
+      setState(() => _dataPrevistaEntrega = escolhida);
+    }
+  }
+
+  String _formatarData(DateTime data) {
+    return '${data.day.toString().padLeft(2, '0')}/${data.month.toString().padLeft(2, '0')}/${data.year}';
   }
 
   void _iniciarCronometro() {
@@ -80,174 +125,43 @@ class _FormPedidoVendaState extends State<FormPedidoVenda> {
     }
   }
 
-  Future<void> _carregarProdutosAcabados() async {
-    try {
-      var snap = await FirebaseFirestore.instance
-          .collection('produtos')
-          .where('empresa_id', isEqualTo: widget.empresaId)
-          .where('tipo', isEqualTo: 'Produto Acabado')
-          .get();
+  Future<void> _abrirCatalogoParaAdicionarItem() async {
+    final itemSelecionado = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TelaCatalogoVendas(empresaId: widget.empresaId),
+      ),
+    );
 
-      if (mounted) {
-        setState(() {
-          _produtosAcabados = snap.docs;
-          _carregandoProdutos = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _carregandoProdutos = false);
-    }
-  }
-
-  Future<void> _atualizarEstruturaProduto(String? produtoId) async {
-    if (produtoId == null) return;
-
-    setState(() {
-      _tamanhosDisponiveis = [];
-      _coresDisponiveis = [];
-      _gradeControllers.clear();
-      _corSelecionada = null;
-    });
-
-    var docProd = _produtosAcabados.firstWhere((e) => e.id == produtoId);
-    _produtoSelecionadoDados = docProd.data() as Map<String, dynamic>;
-
-    var snapFicha = await FirebaseFirestore.instance
-        .collection('fichas_tecnicas')
-        .where('empresa_id', isEqualTo: widget.empresaId)
-        .where(
-          'produtoId',
-          isEqualTo: produtoId,
-        ) // Mudado para buscar corretamente
-        .limit(1)
-        .get();
-
-    if (snapFicha.docs.isNotEmpty) {
-      var dadosFicha = snapFicha.docs.first.data();
-      List<dynamic> tamRaw = dadosFicha['tamanhos'] ?? [];
-      List<dynamic> coresRaw = dadosFicha['coresComerciais'] ?? [];
-
-      setState(() {
-        _tamanhosDisponiveis = tamRaw.map((e) => e.toString()).toList();
-        _coresDisponiveis = coresRaw.map((e) => e.toString()).toList();
-        for (var tamanho in _tamanhosDisponiveis) {
-          _gradeControllers[tamanho] = TextEditingController(text: '0');
+    if (itemSelecionado != null && itemSelecionado is Map<String, dynamic>) {
+      if (_tipoVenda == 'PRONTA ENTREGA') {
+        try {
+          await FirebaseFirestore.instance
+              .collection('produtos')
+              .doc(itemSelecionado['produtoId'])
+              .update({
+                'estoqueComprometido': FieldValue.increment(
+                  itemSelecionado['quantidadeTotal'],
+                ),
+              });
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⚠️ Offline. Reserva será feita depois.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
         }
-      });
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Este produto não possui Ficha Técnica / Grade comercial vinculada.',
-          ),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      }
+      _iniciarCronometro();
+      setState(() => _carrinhoItens.add(itemSelecionado));
     }
   }
 
-  Future<void> _adicionarItemAoCarrinho() async {
-    if (_produtoSelecionadoId == null || _corSelecionada == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Selecione o produto e a cor!',
-            style: TextStyle(color: Colors.white),
-          ),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    double precoBase = (_produtoSelecionadoDados?['precoVenda'] ?? 49.90)
-        .toDouble();
-    List<Map<String, dynamic>> subItensDigitados = [];
-    double totalQuantidadeItem = 0;
-
-    _gradeControllers.forEach((tamanho, controller) {
-      double qtd = double.tryParse(controller.text) ?? 0;
-      if (qtd > 0) {
-        totalQuantidadeItem += qtd;
-        subItensDigitados.add({'tamanho': tamanho, 'quantidade': qtd});
-      }
-    });
-
-    if (totalQuantidadeItem == 0) return;
-
-    if (_tipoVenda == 'PRONTA ENTREGA') {
-      var docAtualizado = await FirebaseFirestore.instance
-          .collection('produtos')
-          .doc(_produtoSelecionadoId)
-          .get();
-      double estoqueFisico = (docAtualizado.data()?['estoqueFisico'] ?? 0)
-          .toDouble();
-      double estoqueComprometido =
-          (docAtualizado.data()?['estoqueComprometido'] ?? 0).toDouble();
-      double estoqueLivre = estoqueFisico - estoqueComprometido;
-
-      if (totalQuantidadeItem > estoqueLivre) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Estoque Insuficiente! Apenas ${estoqueLivre.toStringAsFixed(0)} pçs disponíveis.',
-            ),
-            backgroundColor: Colors.amber.shade900,
-          ),
-        );
-        return;
-      }
-
-      // TRANSAÇÃO: Reserva IMEDIATAMENTE no Firebase
-      try {
-        await FirebaseFirestore.instance
-            .collection('produtos')
-            .doc(_produtoSelecionadoId)
-            .update({
-              'estoqueComprometido': FieldValue.increment(totalQuantidadeItem),
-            });
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              '⚠️ Você está Offline. O estoque será reservado quando recuperar o sinal.',
-            ),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
-    }
-
-    _iniciarCronometro();
-
-    setState(() {
-      _carrinhoItens.add({
-        'idTemporario': DateTime.now().millisecondsSinceEpoch.toString(),
-        'produtoId': _produtoSelecionadoId,
-        'referencia': _produtoSelecionadoDados?['referencia'] ?? 'SEM REF',
-        'nome': _produtoSelecionadoDados?['nome'] ?? 'Produto',
-        'cor': _corSelecionada,
-        'precoUnitario': precoBase,
-        'quantidadeTotal': totalQuantidadeItem,
-        'valorTotal': totalQuantidadeItem * precoBase,
-        'gradeDistribuicao': subItensDigitados,
-      });
-
-      _produtoSelecionadoId = null;
-      _produtoSelecionadoDados = null;
-      _tamanhosDisponiveis = [];
-      _coresDisponiveis = [];
-      _gradeControllers.clear();
-      _corSelecionada = null;
-    });
-  }
-
-  // --- REMOÇÃO COM DEVOLUÇÃO IMEDIATA DE ESTOQUE ---
   Future<void> _removerItem(String idTemporario) async {
     var item = _carrinhoItens.firstWhere(
       (e) => e['idTemporario'] == idTemporario,
     );
-
     if (_tipoVenda == 'PRONTA ENTREGA') {
       try {
         await FirebaseFirestore.instance
@@ -258,11 +172,8 @@ class _FormPedidoVendaState extends State<FormPedidoVenda> {
                 -item['quantidadeTotal'],
               ),
             });
-      } catch (e) {
-        // Trata erro de rede offline
-      }
+      } catch (e) {}
     }
-
     setState(() {
       _carrinhoItens.removeWhere((e) => e['idTemporario'] == idTemporario);
       if (_carrinhoItens.isEmpty) {
@@ -272,124 +183,102 @@ class _FormPedidoVendaState extends State<FormPedidoVenda> {
     });
   }
 
-  double get _totalGeralPedido {
-    return _carrinhoItens.fold(
-      0.0,
-      (soma, item) => soma + (item['valorTotal'] ?? 0.0),
-    );
+  double get _valorTotalTabelaPura => _carrinhoItens.fold(
+    0.0,
+    (soma, item) => soma + (item['quantidadeTotal'] * item['precoTabela']),
+  );
+  double get _valorParcialNegociadoNasPecas => _carrinhoItens.fold(
+    0.0,
+    (soma, item) => soma + (item['quantidadeTotal'] * item['precoVendido']),
+  );
+  double get _valorFinalComDescontoExtra =>
+      _valorParcialNegociadoNasPecas * (1 - (_descontoExtraPerc / 100));
+  double get _descontoRealTotalPerc {
+    if (_valorTotalTabelaPura == 0) return 0.0;
+    return 100 - ((_valorFinalComDescontoExtra / _valorTotalTabelaPura) * 100);
   }
 
-  Future<void> _fecharSalvamentoPedido() async {
+  double get _comissaoPerc {
+    double desc = _descontoRealTotalPerc;
+    if (desc <= 10.01) return 10.0;
+    if (desc <= 15.01) return 8.0;
+    if (desc <= 20.01) return 6.0;
+    if (desc <= 25.01) return 5.0;
+    return 0.0;
+  }
+
+  Color _getCorTermometro() {
+    double desc = _descontoRealTotalPerc;
+    if (desc <= 0.01) return Colors.blueGrey;
+    if (desc <= 10.01) return Colors.blue.shade600;
+    if (desc <= 15.01) return Colors.amber.shade600;
+    if (desc <= 20.01) return Colors.orange.shade600;
+    if (desc <= 25.01) return Colors.red.shade600;
+    return Colors.deepPurple;
+  }
+
+  void _revisarPedido() {
     if (_carrinhoItens.isEmpty) return;
 
-    setState(() => _salvandoPedido = true);
-    final db = FirebaseFirestore.instance;
+    if (_formaPagamentoSelecionada == null ||
+        _condicaoPagamentoSelecionada == null ||
+        _dataPrevistaEntrega == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            '⚠️ Preencha a Data de Entrega e as Condições Financeiras antes de revisar o pedido!',
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
 
-    try {
-      DocumentReference refPedido = db.collection('pedidos_venda').doc();
+    setState(() => _preparandoPedido = true);
 
-      await refPedido.set({
-        'empresa_id': widget.empresaId,
-        'clienteId': widget.clienteId,
-        'clienteNome': widget.clienteNome,
-        'regiao': widget.regiao,
-        'tipoVenda': _tipoVenda,
-        'status': 'ABERTO',
-        'valorTotal': _totalGeralPedido,
-        'itens': _carrinhoItens,
-        'dataPedido': FieldValue.serverTimestamp(),
-      });
+    Map<String, dynamic> pacoteParaPDF = {
+      'empresa_id': widget.empresaId,
+      'clienteId': widget.clienteId,
+      'clienteNome': widget.clienteNome,
+      'regiao': widget.regiao,
+      'whatsapp': widget.whatsappCliente, // <-- PEGA DIRETO DA TELA ANTERIOR
+      'tipoVenda': _tipoVenda,
+      'formaPagamento': _formaPagamentoSelecionada,
+      'condicaoPagamento': _condicaoPagamentoSelecionada,
+      'dataEntregaPrevista': _dataPrevistaEntrega,
+      'dataEntregaStr': _formatarData(_dataPrevistaEntrega!),
+      'valorTotalTabela': _valorTotalTabelaPura,
+      'valorFinalCobrado': _valorFinalComDescontoExtra,
+      'descontoRealAplicadoPerc': _descontoRealTotalPerc,
+      'comissaoPrevistaPerc': _comissaoPerc,
+      'comissaoPrevistaValor':
+          _valorFinalComDescontoExtra * (_comissaoPerc / 100),
+      'itens': _carrinhoItens,
+      'statusPrevisto': _descontoRealTotalPerc > 25.01
+          ? 'SOB ANÁLISE (DIRETORIA)'
+          : 'ABERTO',
+    };
 
+    Future.delayed(const Duration(milliseconds: 300), () {
       if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Pedido consolidado com sucesso!'),
-            backgroundColor: Colors.green,
+        setState(() => _preparandoPedido = false);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                TelaPreviewPedidoPDF(dadosPedido: pacoteParaPDF),
           ),
         );
       }
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Erro: $e')));
-    } finally {
-      if (mounted) setState(() => _salvandoPedido = false);
-    }
-  }
-
-  Widget _buildDrawerManualComercial() {
-    return Drawer(
-      width: MediaQuery.of(context).size.width * 0.85,
-      child: SafeArea(
-        child: Column(
-          children: [
-            Container(
-              color: Colors.teal.shade700,
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.gavel, color: Colors.white, size: 32),
-                  SizedBox(height: 8),
-                  Text(
-                    'REGRAS COMERCIAIS ERP',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    'Soft Allocation Dinâmico',
-                    style: TextStyle(color: Colors.white70, fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: const [
-                  Text(
-                    '1. Janela de 3 Horas',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.teal,
-                    ),
-                  ),
-                  Text(
-                    'A reserva de Pronta Entrega atua na fração de segundo em que o item é adicionado à lista. O vendedor possui exatamente 3 horas para consolidar a operação antes que a nuvem efetue o estorno automático para o estoque livre da fábrica.',
-                  ),
-                  SizedBox(height: 16),
-                  Text(
-                    '2. Modo Offline',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.teal,
-                    ),
-                  ),
-                  Text(
-                    'Se o tablet perder a conexão, o item entra no carrinho, mas a reserva oficial só é selada quando a rede retorna. Se outro vendedor capturar a peça durante o "apagão" de rede, o ERP invalidará o carrinho desatualizado para prevenir furos logísticos.',
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final GlobalKey<ScaffoldState> oScaffoldKey = GlobalKey<ScaffoldState>();
+    Color corAcao = _getCorTermometro();
+    bool bloqueioDiretoria = _descontoRealTotalPerc > 25.01;
 
     return Scaffold(
-      key: oScaffoldKey,
-      endDrawer: _isAdmin ? _buildDrawerManualComercial() : null,
       backgroundColor: Colors.grey.shade100,
       appBar: AppBar(
         title: const Text(
@@ -398,355 +287,487 @@ class _FormPedidoVendaState extends State<FormPedidoVenda> {
         ),
         backgroundColor: Colors.indigo,
         foregroundColor: Colors.white,
-        actions: [
-          if (_isAdmin)
-            IconButton(
-              icon: const Icon(Icons.help_outline, color: Colors.amber),
-              onPressed: () => oScaffoldKey.currentState?.openEndDrawer(),
-            ),
-        ],
       ),
-      body: _carregandoProdutos
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
+      body: Column(
+        children: [
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // --- PAINEL CLIENTE & CRONÓMETRO ---
-                Container(
-                  color: Colors.white,
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'CLIENTE: ${widget.clienteNome}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: Colors.indigo,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (_tempoExpiracao != null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: Colors.red.shade200),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.timer,
-                                    size: 14,
-                                    color: Colors.red.shade700,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    _tempoRestanteStr,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.red.shade700,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
-                      ),
-                      Text(
-                        'Região Comercial: ${widget.regiao}',
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'CLIENTE: ${widget.clienteNome}',
                         style: const TextStyle(
-                          color: Colors.grey,
-                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: Colors.indigo,
                         ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          ChoiceChip(
-                            label: const Text('PRONTA ENTREGA'),
-                            selected: _tipoVenda == 'PRONTA ENTREGA',
-                            onSelected: _carrinhoItens.isEmpty
-                                ? (val) {
-                                    if (val)
-                                      setState(
-                                        () => _tipoVenda = 'PRONTA ENTREGA',
-                                      );
-                                  }
-                                : null,
-                          ),
-                          const SizedBox(width: 8),
-                          ChoiceChip(
-                            label: const Text('PROGRAMADA'),
-                            selected: _tipoVenda == 'PROGRAMADA',
-                            onSelected: _carrinhoItens.isEmpty
-                                ? (val) {
-                                    if (val)
-                                      setState(() => _tipoVenda = 'PROGRAMADA');
-                                  }
-                                : null,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                // --- INSERÇÃO DE ITENS ---
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(12),
-                    child: Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                    if (_tempoExpiracao != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.red.shade200),
+                        ),
+                        child: Row(
                           children: [
-                            DropdownButtonFormField<String>(
-                              decoration: const InputDecoration(
-                                labelText: 'Escolha o Modelo',
-                                border: OutlineInputBorder(),
-                              ),
-                              value: _produtoSelecionadoId,
-                              items: _produtosAcabados.map((doc) {
-                                var d = doc.data() as Map<String, dynamic>;
-                                return DropdownMenuItem<String>(
-                                  value: doc.id,
-                                  child: Text(
-                                    '[${d['referencia']}] ${d['nome']}',
-                                  ),
-                                );
-                              }).toList(),
-                              onChanged: (val) {
-                                setState(() => _produtoSelecionadoId = val);
-                                _atualizarEstruturaProduto(val);
-                              },
+                            Icon(
+                              Icons.timer,
+                              size: 14,
+                              color: Colors.red.shade700,
                             ),
-                            if (_produtoSelecionadoId != null &&
-                                _coresDisponiveis.isNotEmpty) ...[
-                              const SizedBox(height: 12),
-                              // O DROPDOWN AGORA LÊ AS CORES VINDAS DA FICHA TÉCNICA
-                              DropdownButtonFormField<String>(
-                                decoration: const InputDecoration(
-                                  labelText: 'Selecione a Cor Comercial',
-                                  border: OutlineInputBorder(),
-                                ),
-                                value: _corSelecionada,
-                                items: _coresDisponiveis
-                                    .map(
-                                      (c) => DropdownMenuItem(
-                                        value: c,
-                                        child: Text(c),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: (val) =>
-                                    setState(() => _corSelecionada = val),
+                            const SizedBox(width: 4),
+                            Text(
+                              _tempoRestanteStr,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red.shade700,
+                                fontSize: 12,
                               ),
-                            ] else if (_produtoSelecionadoId != null &&
-                                _coresDisponiveis.isEmpty) ...[
-                              const SizedBox(height: 12),
-                              const Text(
-                                'Nenhuma cor autorizada para venda neste produto.',
-                                style: TextStyle(
-                                  color: Colors.red,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-
-                            if (_tamanhosDisponiveis.isNotEmpty &&
-                                _coresDisponiveis.isNotEmpty) ...[
-                              const SizedBox(height: 16),
-                              Table(
-                                border: TableBorder.all(
-                                  color: Colors.grey.shade300,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                children: [
-                                  TableRow(
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey.shade100,
-                                    ),
-                                    children: _tamanhosDisponiveis
-                                        .map(
-                                          (t) => Padding(
-                                            padding: const EdgeInsets.all(6.0),
-                                            child: Text(
-                                              t,
-                                              textAlign: TextAlign.center,
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                        )
-                                        .toList(),
-                                  ),
-                                  TableRow(
-                                    children: _tamanhosDisponiveis
-                                        .map(
-                                          (t) => Padding(
-                                            padding: const EdgeInsets.all(4.0),
-                                            child: TextFormField(
-                                              controller: _gradeControllers[t],
-                                              keyboardType:
-                                                  TextInputType.number,
-                                              textAlign: TextAlign.center,
-                                              decoration: const InputDecoration(
-                                                isDense: true,
-                                                border: InputBorder.none,
-                                              ),
-                                            ),
-                                          ),
-                                        )
-                                        .toList(),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.teal,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  icon: const Icon(Icons.add_shopping_cart),
-                                  label: const Text(
-                                    'RESERVAR E ADICIONAR ITEM',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  onPressed: _adicionarItemAoCarrinho,
-                                ),
-                              ),
-                            ],
+                            ),
                           ],
                         ),
                       ),
+                  ],
+                ),
+                Text(
+                  'Região Comercial: ${widget.regiao}',
+                  style: const TextStyle(color: Colors.grey, fontSize: 11),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    ChoiceChip(
+                      label: const Text('PRONTA ENTREGA'),
+                      selected: _tipoVenda == 'PRONTA ENTREGA',
+                      onSelected: _carrinhoItens.isEmpty
+                          ? (val) {
+                              if (val)
+                                setState(() => _tipoVenda = 'PRONTA ENTREGA');
+                            }
+                          : null,
                     ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('PROGRAMADA'),
+                      selected: _tipoVenda == 'PROGRAMADA',
+                      onSelected: _carrinhoItens.isEmpty
+                          ? (val) {
+                              if (val)
+                                setState(() => _tipoVenda = 'PROGRAMADA');
+                            }
+                          : null,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
+                icon: const Icon(Icons.storefront, size: 24),
+                label: const Text(
+                  '➕ ABRIR CATÁLOGO DE VENDAS',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                onPressed: _abrirCatalogoParaAdicionarItem,
+              ),
+            ),
+          ),
+          Expanded(
+            child: _carrinhoItens.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Carrinho vazio. Abra o catálogo para lançar itens.',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _carrinhoItens.length,
+                    itemBuilder: (context, index) {
+                      final item = _carrinhoItens[index];
+                      double totalItemTabela =
+                          item['quantidadeTotal'] * item['precoTabela'];
+                      double totalItemVendido =
+                          item['quantidadeTotal'] * item['precoVendido'];
+                      bool temDescontoNaPeca =
+                          item['precoVendido'] < item['precoTabela'];
 
-                // --- LISTA DO CARRINHO ---
-                Container(
-                  height: 160,
-                  color: Colors.white,
-                  child: _carrinhoItens.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'Carrinho vazio. Cestas prontas para uso.',
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                        )
-                      : ListView.builder(
-                          itemCount: _carrinhoItens.length,
-                          itemBuilder: (context, index) {
-                            final item = _carrinhoItens[index];
-                            return ListTile(
-                              leading: const Icon(
-                                Icons.check_circle,
-                                color: Colors.green,
-                              ),
-                              title: Text(
-                                '${item['nome']} (${item['cor']})',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                ),
-                              ),
-                              subtitle: Text(
-                                'Qtd: ${item['quantidadeTotal']} pçs',
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'R\$ ${item['valorTotal'].toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        child: ListTile(
+                          leading: (item['fotoBase64'] != null)
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Image.memory(
+                                    base64Decode(item['fotoBase64']),
+                                    width: 40,
+                                    height: 40,
+                                    fit: BoxFit.cover,
                                   ),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.delete,
-                                      color: Colors.red,
+                                )
+                              : const Icon(
+                                  Icons.checkroom,
+                                  color: Colors.teal,
+                                  size: 40,
+                                ),
+                          title: Text(
+                            item['nome'],
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'Qtd: ${item['quantidadeTotal']} pçs',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  if (temDescontoNaPeca)
+                                    Text(
+                                      'R\$ ${totalItemTabela.toStringAsFixed(2)}',
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey,
+                                        decoration: TextDecoration.lineThrough,
+                                      ),
                                     ),
-                                    onPressed: () =>
-                                        _removerItem(item['idTemporario']),
+                                  Text(
+                                    'R\$ ${totalItemVendido.toStringAsFixed(2)}',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: temDescontoNaPeca
+                                          ? Colors.orange.shade700
+                                          : Colors.black87,
+                                    ),
                                   ),
                                 ],
                               ),
-                            );
-                          },
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.delete,
+                                  color: Colors.red,
+                                ),
+                                onPressed: () =>
+                                    _removerItem(item['idTemporario']),
+                              ),
+                            ],
+                          ),
                         ),
-                ),
-
-                // --- RODAPÉ DE FECHAMENTO ---
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  color: Colors.white,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      );
+                    },
+                  ),
+          ),
+          if (_carrinhoItens.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.all(12),
+              color: Colors.white,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Condições Comerciais e Entrega',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.indigo,
+                    ),
+                  ),
+                  const Divider(),
+                  Row(
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          decoration: const InputDecoration(
+                            labelText: 'Forma Pgto',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          value: _formaPagamentoSelecionada,
+                          items: _listaFormasPagamento
+                              .map(
+                                (f) => DropdownMenuItem<String>(
+                                  value: f['nome'],
+                                  child: Text(
+                                    f['nome'],
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (val) =>
+                              setState(() => _formaPagamentoSelecionada = val),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          decoration: const InputDecoration(
+                            labelText: 'Prazo',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          value: _condicaoPagamentoSelecionada,
+                          items: _listaCondicoesPagamento
+                              .map(
+                                (c) => DropdownMenuItem<String>(
+                                  value: c['nome'],
+                                  child: Text(
+                                    c['nome'],
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (val) => setState(
+                            () => _condicaoPagamentoSelecionada = val,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  InkWell(
+                    onTap: _selecionarDataEntrega,
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Data Prevista para Entrega',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
-                            'TOTAL DO PEDIDO',
+                          Text(
+                            _dataPrevistaEntrega == null
+                                ? 'Selecionar Data...'
+                                : _formatarData(_dataPrevistaEntrega!),
                             style: TextStyle(
-                              fontSize: 11,
+                              color: _dataPrevistaEntrega == null
+                                  ? Colors.red
+                                  : Colors.black87,
                               fontWeight: FontWeight.bold,
-                              color: Colors.grey,
                             ),
                           ),
-                          Text(
-                            'R\$ ${_totalGeralPedido.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green,
+                          const Icon(
+                            Icons.calendar_today,
+                            size: 18,
+                            color: Colors.indigo,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (_carrinhoItens.isNotEmpty)
+            Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 10,
+                    offset: Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      color: corAcao.withOpacity(0.1),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Total Tabela: R\$ ${_valorTotalTabelaPura.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                    decoration: TextDecoration.lineThrough,
+                                  ),
+                                ),
+                                Text(
+                                  'Total Final: R\$ ${_valorFinalComDescontoExtra.toStringAsFixed(2)}',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18,
+                                    color: corAcao,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          SizedBox(
+                            width: 130,
+                            child: TextFormField(
+                              controller: _descontoExtraCtrl,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: corAcao,
+                              ),
+                              decoration: InputDecoration(
+                                labelText: 'Desc. Extra (%)',
+                                isDense: true,
+                                border: const OutlineInputBorder(),
+                                suffixIcon: Icon(
+                                  Icons.percent,
+                                  size: 14,
+                                  color: corAcao,
+                                ),
+                              ),
+                              onChanged: (val) => setState(
+                                () => _descontoExtraPerc =
+                                    double.tryParse(val.replaceAll(',', '.')) ??
+                                    0.0,
+                              ),
                             ),
                           ),
                         ],
                       ),
-                      _salvandoPedido
-                          ? const CircularProgressIndicator()
-                          : ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.indigo,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 24,
-                                  vertical: 16,
-                                ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 6,
+                      ),
+                      color: corAcao.withOpacity(0.2),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                bloqueioDiretoria
+                                    ? Icons.lock
+                                    : Icons.analytics,
+                                color: corAcao,
+                                size: 16,
                               ),
-                              onPressed: _fecharSalvamentoPedido,
-                              child: const Text(
-                                'CONSOLIDAR PEDIDO',
+                              const SizedBox(width: 8),
+                              Text(
+                                'Desconto Real: ${_descontoRealTotalPerc.toStringAsFixed(1)}%',
                                 style: TextStyle(
-                                  color: Colors.white,
                                   fontWeight: FontWeight.bold,
+                                  color: corAcao,
                                 ),
                               ),
-                            ),
-                    ],
-                  ),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              if (_mostrarComissao && !bloqueioDiretoria)
+                                Text(
+                                  'Comissão: ${_comissaoPerc}%',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: corAcao,
+                                  ),
+                                ),
+                              if (_mostrarComissao && bloqueioDiretoria)
+                                Text(
+                                  'Comissão Suspensa',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: corAcao,
+                                  ),
+                                ),
+                              const SizedBox(width: 8),
+                              InkWell(
+                                onTap: () => setState(
+                                  () => _mostrarComissao = !_mostrarComissao,
+                                ),
+                                child: Icon(
+                                  _mostrarComissao
+                                      ? Icons.visibility
+                                      : Icons.visibility_off,
+                                  color: Colors.grey.shade600,
+                                  size: 20,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: _preparandoPedido
+                            ? const Center(child: CircularProgressIndicator())
+                            : ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: corAcao,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 16,
+                                  ),
+                                ),
+                                icon: const Icon(Icons.picture_as_pdf),
+                                label: const Text(
+                                  'REVISAR PEDIDO (GERAR PDF)',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                onPressed: _revisarPedido,
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
+        ],
+      ),
     );
   }
 }

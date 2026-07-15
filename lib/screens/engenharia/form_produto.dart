@@ -5,13 +5,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 
 class FormProduto extends StatefulWidget {
-  final String empresaId; // <-- CHAVE MESTRA RECEBIDA AQUI
+  final String empresaId;
   final String? produtoId;
   final Map<String, dynamic>? dadosAtuais;
 
   const FormProduto({
     Key? key,
-    required this.empresaId, // <-- OBRIGATÓRIO NA CONSTRUÇÃO
+    required this.empresaId,
     this.produtoId,
     this.dadosAtuais,
   }) : super(key: key);
@@ -30,6 +30,7 @@ class _FormProdutoState extends State<FormProduto> {
   late TextEditingController _descricaoController;
 
   String? _tipoSelecionado;
+  String? _categoriaSelecionada; // <-- NOVO CAMPO DE CATEGORIA
   bool _isLoading = false;
 
   // --- MÓDULO FOTOGRÁFICO ---
@@ -37,9 +38,13 @@ class _FormProdutoState extends State<FormProduto> {
   final ImagePicker _picker = ImagePicker();
 
   final List<String> _tiposProduto = [
-    'Produto Intermediário', // A Peça Pai
-    'Produto Acabado', // A Peça Filha (Aparecerá no Catálogo)
+    'Produto Intermediário',
+    'Produto Acabado',
   ];
+
+  // --- CONTROLO DA TABELA DINÂMICA DE CATEGORIAS ---
+  String? _tabelaCategoriaId;
+  bool _isLoadingCategoriaConfig = true;
 
   @override
   void initState() {
@@ -53,7 +58,10 @@ class _FormProdutoState extends State<FormProduto> {
     _descricaoController = TextEditingController(
       text: widget.dadosAtuais?['descricao'] ?? '',
     );
+
     _tipoSelecionado = widget.dadosAtuais?['tipo'];
+    _categoriaSelecionada =
+        widget.dadosAtuais?['categoria']; // Recupera a categoria se for edição
 
     // Recuperar a foto existente, se houver
     if (widget.dadosAtuais != null &&
@@ -64,14 +72,37 @@ class _FormProdutoState extends State<FormProduto> {
         debugPrint('Erro ao descodificar imagem antiga: $e');
       }
     }
+
+    _buscarIdTabelaCategoria();
   }
 
-  @override
-  void dispose() {
-    _nomeController.dispose();
-    _referenciaController.dispose();
-    _descricaoController.dispose();
-    super.dispose();
+  // =========================================================================
+  // CAÇA AO ID DA TABELA "CATEGORIA"
+  // =========================================================================
+  Future<void> _buscarIdTabelaCategoria() async {
+    try {
+      // Procura a tabela de configuração que você acabou de criar no motor
+      var query = await FirebaseFirestore.instance
+          .collection('tabelas_auxiliares_config')
+          .where(
+            'clienteId',
+            isEqualTo: 'teste_textil',
+          ) // Respeita o seu padrão atual
+          .get();
+
+      for (var doc in query.docs) {
+        String titulo = doc['titulo'].toString().toLowerCase().trim();
+        // Cobre tanto "Categoria" quanto "Categorias"
+        if (titulo == 'categoria' || titulo == 'categorias') {
+          _tabelaCategoriaId = doc.id;
+          break;
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao buscar config da categoria: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingCategoriaConfig = false);
+    }
   }
 
   // =========================================================================
@@ -81,24 +112,22 @@ class _FormProdutoState extends State<FormProduto> {
     try {
       final XFile? pickedFile = await _picker.pickImage(
         source: source,
-        maxWidth: 800, // Compressão 1: Limite de dimensão
-        maxHeight: 800, // Compressão 2: Limite de dimensão
-        imageQuality:
-            70, // Compressão 3: Qualidade (70% é ideal para web/mobile veloz)
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 70,
       );
       if (pickedFile != null) {
         final Uint8List bytes = await pickedFile.readAsBytes();
         setState(() => _imagemBytes = bytes);
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Erro ao capturar imagem: $e'),
             backgroundColor: Colors.red,
           ),
         );
-      }
     }
   }
 
@@ -155,16 +184,17 @@ class _FormProdutoState extends State<FormProduto> {
   // =========================================================================
   Future<void> _salvarProduto() async {
     if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-      });
+      setState(() => _isLoading = true);
 
       try {
         final dadosProduto = {
-          'empresa_id': widget.empresaId, // <-- CHAVE MESTRA GRAVADA
+          'empresa_id': widget.empresaId,
           'nome': _nomeController.text.trim(),
           'referencia': _referenciaController.text.trim(),
           'tipo': _tipoSelecionado,
+          'categoria':
+              _categoriaSelecionada ??
+              'Sem Categoria', // <-- APLICA A CATEGORIA OFICIAL
           'descricao': _descricaoController.text.trim(),
           'fotoBase64': _imagemBytes != null
               ? base64Encode(_imagemBytes!)
@@ -173,34 +203,116 @@ class _FormProdutoState extends State<FormProduto> {
         };
 
         if (widget.produtoId == null) {
-          // Criação
           dadosProduto['criadoEm'] = FieldValue.serverTimestamp();
           await _produtosRef.add(dadosProduto);
         } else {
-          // Edição
           await _produtosRef.doc(widget.produtoId).update(dadosProduto);
         }
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Produto salvo com sucesso!')),
+            const SnackBar(
+              content: Text('Produto salvo com sucesso!'),
+              backgroundColor: Colors.green,
+            ),
           );
           Navigator.of(context).pop();
         }
       } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Erro ao salvar produto: $e')));
-        }
+        if (mounted)
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao salvar produto: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
       } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
+        if (mounted) setState(() => _isLoading = false);
       }
     }
+  }
+
+  // =========================================================================
+  // O NOVO WIDGET DINÂMICO DO DROPDOWN DE CATEGORIA
+  // =========================================================================
+  Widget _construirDropdownCategoria() {
+    if (_isLoadingCategoriaConfig) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8.0),
+        child: LinearProgressIndicator(),
+      );
+    }
+
+    if (_tabelaCategoriaId == null) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.amber.shade50,
+          border: Border.all(color: Colors.amber),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: const Text(
+          'Tabela de "Categoria" não encontrada nos Cadastros Base. Crie-a primeiro.',
+          style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold),
+        ),
+      );
+    }
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('tabelas_auxiliares_dados')
+          .where('clienteId', isEqualTo: 'teste_textil')
+          .where('tabelaId', isEqualTo: _tabelaCategoriaId)
+          .where('ativo', isEqualTo: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting)
+          return const LinearProgressIndicator();
+
+        List<DropdownMenuItem<String>> itens = [];
+        if (snapshot.hasData) {
+          var docs = snapshot.data!.docs;
+          // Ordena alfabeticamente a lista para facilitar a vida do operador
+          docs.sort(
+            (a, b) => (a['nome'] ?? '').toString().compareTo(
+              (b['nome'] ?? '').toString(),
+            ),
+          );
+
+          for (var doc in docs) {
+            String nomeCat = doc['nome'];
+            itens.add(DropdownMenuItem(value: nomeCat, child: Text(nomeCat)));
+          }
+        }
+
+        // Se o produto for antigo e tiver uma categoria que foi apagada, garante que o dropdown não quebre
+        if (_categoriaSelecionada != null &&
+            _categoriaSelecionada != 'Sem Categoria' &&
+            !itens.any((item) => item.value == _categoriaSelecionada)) {
+          itens.add(
+            DropdownMenuItem(
+              value: _categoriaSelecionada,
+              child: Text('$_categoriaSelecionada (Inativa)'),
+            ),
+          );
+        }
+
+        return DropdownButtonFormField<String>(
+          decoration: const InputDecoration(
+            labelText: 'Categoria do Produto *',
+            border: OutlineInputBorder(),
+          ),
+          value: _categoriaSelecionada == 'Sem Categoria'
+              ? null
+              : _categoriaSelecionada,
+          items: itens,
+          onChanged: (value) => setState(() => _categoriaSelecionada = value),
+          validator: (value) => value == null || value.isEmpty
+              ? 'Selecione uma categoria válida'
+              : null,
+        );
+      },
+    );
   }
 
   // =========================================================================
@@ -280,17 +392,6 @@ class _FormProdutoState extends State<FormProduto> {
 
                     // --- CAMPOS DO FORMULÁRIO ---
                     TextFormField(
-                      controller: _nomeController,
-                      decoration: const InputDecoration(
-                        labelText: 'Nome do Produto *',
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (value) => value == null || value.isEmpty
-                          ? 'O nome é obrigatório'
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
                       controller: _referenciaController,
                       decoration: const InputDecoration(
                         labelText: 'Referência / Código *',
@@ -301,20 +402,38 @@ class _FormProdutoState extends State<FormProduto> {
                           : null,
                     ),
                     const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _nomeController,
+                      decoration: const InputDecoration(
+                        labelText: 'Nome do Produto *',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) => value == null || value.isEmpty
+                          ? 'O nome é obrigatório'
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+
+                    // --- O NOVO DROPDOWN MÁGICO ---
+                    _construirDropdownCategoria(),
+
+                    const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
                       decoration: const InputDecoration(
                         labelText: 'Tipo de Produto *',
                         border: OutlineInputBorder(),
                       ),
                       value: _tipoSelecionado,
-                      items: _tiposProduto.map((tipo) {
-                        return DropdownMenuItem(value: tipo, child: Text(tipo));
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          _tipoSelecionado = value;
-                        });
-                      },
+                      items: _tiposProduto
+                          .map(
+                            (tipo) => DropdownMenuItem(
+                              value: tipo,
+                              child: Text(tipo),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) =>
+                          setState(() => _tipoSelecionado = value),
                       validator: (value) =>
                           value == null ? 'Selecione o tipo do produto' : null,
                     ),

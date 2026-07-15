@@ -19,7 +19,18 @@ class _TelaListaFichasState extends State<TelaListaFichas> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Fichas Técnicas'), centerTitle: true),
+      appBar: AppBar(
+        title: const Text('Fichas Técnicas'),
+        centerTitle: true,
+        // --- CORREÇÃO DO BOTÃO DE VOLTAR NO WEB ---
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Voltar',
+          onPressed: () {
+            Navigator.of(context).pop();
+          },
+        ),
+      ),
       body: StreamBuilder<QuerySnapshot>(
         stream: _fichasRef
             .where('empresa_id', isEqualTo: widget.empresaId)
