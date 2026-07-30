@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'dart:convert'; // <-- Importação necessária
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -26,6 +26,9 @@ class _TelaAprovacaoClienteState extends State<TelaAprovacaoCliente> {
   bool _confirmado = false;
   String _mensagemErro = '';
   Map<String, dynamic>? _dadosPedido;
+
+  // Variável para saber se o cliente pediu ajuste
+  bool _pedidoRecusado = false;
 
   pw.Font? _fonteNormal;
   pw.Font? _fonteNegrito;
@@ -67,7 +70,16 @@ class _TelaAprovacaoClienteState extends State<TelaAprovacaoCliente> {
         if (data['tokenAprovacao'] == widget.token) {
           setState(() {
             _dadosPedido = data;
-            _confirmado = data['status'] != 'AGUARDANDO APROVAÇÃO DO CLIENTE';
+
+            // Verifica se já foi finalizado (seja aprovado ou recusado)
+            if (data['status_comercial'] == 'Devolvido pelo Cliente' ||
+                data['status'] == 'Devolvido pelo Cliente') {
+              _pedidoRecusado = true;
+              _confirmado = true; // Trava os botões
+            } else if (data['status'] != 'AGUARDANDO APROVAÇÃO DO CLIENTE') {
+              _confirmado = true;
+            }
+
             _carregando = false;
           });
         } else {
@@ -90,14 +102,10 @@ class _TelaAprovacaoClienteState extends State<TelaAprovacaoCliente> {
     }
   }
 
-  // =========================================================================
-  // O MOTOR QUE DESENHA O PDF COM FOTOS (FOLHA A4) - CLIENTE
-  // =========================================================================
   Future<Uint8List> _gerarPdf() async {
     final pdf = pw.Document();
     final dados = _dadosPedido!;
     final List itens = dados['itens'] ?? [];
-
     final corTabela = PdfColors.teal;
     final corTextoTabela = PdfColors.white;
 
@@ -180,13 +188,13 @@ class _TelaAprovacaoClienteState extends State<TelaAprovacaoCliente> {
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
               columnWidths: {
-                0: const pw.FixedColumnWidth(40), // Foto
-                1: const pw.FlexColumnWidth(1.2), // Ref
-                2: const pw.FlexColumnWidth(2.5), // Produto
-                3: const pw.FlexColumnWidth(4.5), // Grade
-                4: const pw.FlexColumnWidth(0.8), // Qtd
-                5: const pw.FlexColumnWidth(1.5), // Unit.
-                6: const pw.FlexColumnWidth(1.5), // Subtotal
+                0: const pw.FixedColumnWidth(40),
+                1: const pw.FlexColumnWidth(1.2),
+                2: const pw.FlexColumnWidth(2.5),
+                3: const pw.FlexColumnWidth(4.5),
+                4: const pw.FlexColumnWidth(0.8),
+                5: const pw.FlexColumnWidth(1.5),
+                6: const pw.FlexColumnWidth(1.5),
               },
               children: [
                 pw.TableRow(
@@ -355,11 +363,15 @@ class _TelaAprovacaoClienteState extends State<TelaAprovacaoCliente> {
           .doc(widget.pedidoId)
           .update({
             'status': 'ABERTO',
+            'status_comercial': 'Em Análise',
+            'metodo_aprovacao': 'Link (Cliente)',
+            'responsavel_aprovacao': 'Cliente Autenticado',
             'dataAprovacaoCliente': FieldValue.serverTimestamp(),
           });
 
       setState(() {
         _confirmado = true;
+        _pedidoRecusado = false;
         _carregando = false;
       });
     } catch (e) {
@@ -368,6 +380,113 @@ class _TelaAprovacaoClienteState extends State<TelaAprovacaoCliente> {
         _carregando = false;
       });
     }
+  }
+
+  // =========================================================================
+  // NOVO: FLUXO DE RECUSA E AJUSTE PELO CLIENTE
+  // =========================================================================
+  void _abrirDialogoAjuste() {
+    final TextEditingController _ajusteCtrl = TextEditingController();
+    bool enviando = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text(
+                'Solicitar Ajuste',
+                style: TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'O que precisa ser alterado neste pedido? O vendedor será notificado para corrigir e enviar um novo link.',
+                    style: TextStyle(fontSize: 13, color: Colors.blueGrey),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _ajusteCtrl,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText:
+                          'Ex: Remover o tamanho M da referência 101, ou alterar a forma de pagamento para PIX...',
+                      border: const OutlineInputBorder(),
+                      filled: true,
+                      fillColor: Colors.red.shade50,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: enviando ? null : () => Navigator.pop(context),
+                  child: const Text(
+                    'Cancelar',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: enviando
+                      ? null
+                      : () async {
+                          if (_ajusteCtrl.text.trim().isEmpty) return;
+                          setDialogState(() => enviando = true);
+
+                          try {
+                            await FirebaseFirestore.instance
+                                .collection('pedidos_venda')
+                                .doc(widget.pedidoId)
+                                .update({
+                                  'status': 'Devolvido pelo Cliente',
+                                  'status_comercial': 'Devolvido pelo Cliente',
+                                  'historico_mensagens': FieldValue.arrayUnion([
+                                    {
+                                      'data': Timestamp.now(),
+                                      'autor': 'CLIENTE',
+                                      'mensagem': _ajusteCtrl.text.trim(),
+                                      'tipo': 'CLIENTE_PARA_VENDEDOR',
+                                    },
+                                  ]),
+                                });
+
+                            Navigator.pop(context); // Fecha o modal
+                            setState(() {
+                              _confirmado = true;
+                              _pedidoRecusado = true;
+                            });
+                          } catch (e) {
+                            setDialogState(() => enviando = false);
+                          }
+                        },
+                  child: enviando
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text('Enviar para o Vendedor'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -407,9 +526,11 @@ class _TelaAprovacaoClienteState extends State<TelaAprovacaoCliente> {
                   : Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
-                          Icons.verified_user,
-                          color: Colors.indigo,
+                        Icon(
+                          _pedidoRecusado
+                              ? Icons.assignment_return
+                              : Icons.verified_user,
+                          color: _pedidoRecusado ? Colors.red : Colors.indigo,
                           size: 60,
                         ),
                         const SizedBox(height: 16),
@@ -462,7 +583,9 @@ class _TelaAprovacaoClienteState extends State<TelaAprovacaoCliente> {
                                   ? Colors.grey.shade600
                                   : Colors.white,
                               disabledBackgroundColor: Colors.grey.shade300,
-                              disabledForegroundColor: Colors.green.shade800,
+                              disabledForegroundColor: _pedidoRecusado
+                                  ? Colors.red.shade800
+                                  : Colors.green.shade800,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8),
                               ),
@@ -471,14 +594,18 @@ class _TelaAprovacaoClienteState extends State<TelaAprovacaoCliente> {
                                 ? null
                                 : _confirmarPedidoOficialmente,
                             icon: Icon(
-                              _confirmado
-                                  ? Icons.check_circle
-                                  : Icons.touch_app,
+                              _pedidoRecusado
+                                  ? Icons.cancel
+                                  : (_confirmado
+                                        ? Icons.check_circle
+                                        : Icons.touch_app),
                             ),
                             label: Text(
-                              _confirmado
-                                  ? 'PEDIDO CONFIRMADO'
-                                  : 'CONFIRMAR PEDIDO',
+                              _pedidoRecusado
+                                  ? 'PEDIDO RECUSADO'
+                                  : (_confirmado
+                                        ? 'PEDIDO CONFIRMADO'
+                                        : 'CONFIRMAR PEDIDO'),
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
@@ -487,14 +614,47 @@ class _TelaAprovacaoClienteState extends State<TelaAprovacaoCliente> {
                           ),
                         ),
 
-                        if (_confirmado)
+                        // NOVO BOTÃO: Solicitar Ajuste (Só aparece se o pedido ainda não foi confirmado/recusado)
+                        if (!_confirmado) ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 40,
+                            child: TextButton.icon(
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.red,
+                              ),
+                              icon: const Icon(Icons.edit_note),
+                              label: const Text(
+                                'SOLICITAR UM AJUSTE',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              onPressed: _abrirDialogoAjuste,
+                            ),
+                          ),
+                        ],
+
+                        if (_confirmado && !_pedidoRecusado)
                           const Padding(
                             padding: EdgeInsets.only(top: 16.0),
                             child: Text(
-                              'Obrigado! Seu pedido já foi liberado para faturamento.',
+                              'Obrigado! Seu pedido já foi registrado com sucesso.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: Colors.green,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+
+                        if (_confirmado && _pedidoRecusado)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 16.0),
+                            child: Text(
+                              'O seu vendedor já foi notificado e irá realizar os ajustes solicitados. Aguarde o novo link.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.red,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),

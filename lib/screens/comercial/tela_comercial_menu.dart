@@ -11,9 +11,10 @@ import 'tela_gestao_regioes.dart';
 import 'tela_cadastro_vendedor.dart';
 
 // ============================================================================
-// IMPORTAÇÃO DA NOVA TELA DE GESTÃO (Na nova subpasta)
+// IMPORTAÇÃO DAS NOVAS TELAS DE GESTÃO (Na nova subpasta)
 // ============================================================================
 import 'gestao/tela_gestao_comercial.dart';
+import 'gestao/tela_gestao_pedidos.dart'; // <-- AQUI ESTÁ O IMPORT DA NOVA TELA
 
 class TelaComercialMenu extends StatefulWidget {
   final String empresaId;
@@ -168,15 +169,22 @@ class _TelaComercialMenuState extends State<TelaComercialMenu> {
             Colors.teal,
             TelaCadastroVendedor(empresaId: widget.empresaId),
           ),
-          // =================================================================
-          // NOVO BOTÃO: GESTÃO DE CARTEIRAS (ACESSÍVEL APENAS A GESTORES)
-          // =================================================================
           _botaoMenuResponsivo(
             context,
             'Gestão de Carteiras',
             Icons.groups,
             Colors.blueGrey,
             TelaGestaoComercial(empresaId: widget.empresaId),
+          ),
+          // =================================================================
+          // NOVO BOTÃO: GESTÃO DE PEDIDOS (APROVAÇÕES)
+          // =================================================================
+          _botaoMenuResponsivo(
+            context,
+            'Gestão de Pedidos',
+            Icons.fact_check,
+            Colors.red.shade700,
+            TelaGestaoPedidos(empresaId: widget.empresaId),
           ),
         ],
       ],

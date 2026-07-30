@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'tela_cadastros_financeiro.dart';
-import 'tela_contas_a_pagar.dart'; // Importação da nova tela de controle
+import 'tela_contas_a_pagar.dart';
+import 'tela_fila_aprovacao_financeira.dart';
 
 class TelaFinanceiroMenu extends StatelessWidget {
-  const TelaFinanceiroMenu({super.key});
+  final String empresaId; // <-- 1. ADICIONAMOS A EXIGÊNCIA AQUI
+
+  const TelaFinanceiroMenu({super.key, required this.empresaId});
 
   Widget _botaoMenu(
     BuildContext context,
@@ -63,7 +66,15 @@ class TelaFinanceiroMenu extends StatelessWidget {
           Colors.blueGrey.shade800,
           null,
         ),
-        // O botão agora aponta para a Tela de Contas a Pagar
+        _botaoMenu(
+          context,
+          'Aprovação de Pedidos',
+          Icons.fact_check,
+          Colors.teal.shade700,
+          TelaFilaAprovacaoFinanceira(
+            empresaId: empresaId,
+          ), // <-- CORRIGIDO AQUI (Sem const e passando o ID)
+        ),
         _botaoMenu(
           context,
           'Contas a Pagar',
@@ -83,7 +94,7 @@ class TelaFinanceiroMenu extends StatelessWidget {
           'Cadastros Financeiros',
           Icons.settings_applications,
           Colors.blueGrey.shade600,
-          const TelaCadastrosFinanceiro(),
+          TelaCadastrosFinanceiro(empresaId: empresaId),
         ),
       ],
     );

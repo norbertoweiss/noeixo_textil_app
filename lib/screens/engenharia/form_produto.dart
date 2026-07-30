@@ -106,18 +106,40 @@ class _FormProdutoState extends State<FormProduto> {
   }
 
   // =========================================================================
-  // GESTÃO DE IMAGENS (CÂMARA / GALERIA) COM COMPRESSÃO
+  // GESTÃO DE IMAGENS COM COMPRESSÃO NATIVA (WINDOWS, WEB, ANDROID, IOS)
   // =========================================================================
   Future<void> _pegarImagem(ImageSource source) async {
     try {
+      // AJUSTE FINO PARA CATÁLOGOS PESADOS (PNGs recortes e estampas detalhadas)
+      // Reduzimos o quadro máximo para 800x800. Isso corta o peso final em quase 40%
+      // comparado com 1024x1024, permitindo que as fotos passem com folga
+      // pela trava de segurança do banco de dados, mantendo a nitidez comercial.
       final XFile? pickedFile = await _picker.pickImage(
         source: source,
         maxWidth: 800,
         maxHeight: 800,
         imageQuality: 70,
       );
+
       if (pickedFile != null) {
         final Uint8List bytes = await pickedFile.readAsBytes();
+
+        // Trava de Segurança extra: Avisa se mesmo após compressão passar do limite seguro
+        // ~700KB é o limite de alerta, pois ao converter para Base64 aumenta 30% do peso.
+        if (bytes.lengthInBytes > 750000) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Aviso: A imagem ainda está muito pesada. Tente outra foto.',
+                ),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          return; // Aborta o salvamento dessa imagem específica
+        }
+
         setState(() => _imagemBytes = bytes);
       }
     } catch (e) {

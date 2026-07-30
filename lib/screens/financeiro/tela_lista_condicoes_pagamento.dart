@@ -19,12 +19,10 @@ class TelaListaCondicoesPagamento extends StatelessWidget {
             .where('clienteId', isEqualTo: 'teste_textil')
             .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) {
+          if (snapshot.hasError)
             return const Center(child: Text('Erro ao carregar dados.'));
-          }
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (snapshot.connectionState == ConnectionState.waiting)
             return const Center(child: CircularProgressIndicator());
-          }
 
           final documentos = snapshot.data!.docs;
 
@@ -42,10 +40,12 @@ class TelaListaCondicoesPagamento extends StatelessWidget {
             itemCount: documentos.length,
             itemBuilder: (context, index) {
               final data = documentos[index].data() as Map<String, dynamic>;
+
               final nome = data['nome'] ?? 'Sem nome';
-              final unidadeTempo = data['unidadeTempo'] ?? '';
-              final intervalo = data['intervalo'] ?? 0;
               final ativo = data['ativo'] ?? true;
+              final qtdParcelas = data['qtd_parcelas'] ?? 1;
+              final primeiroVencimento = data['dias_primeiro_vencimento'] ?? 0;
+              final intervalo = data['intervalo_dias'] ?? 0;
 
               return Card(
                 elevation: 1,
@@ -54,7 +54,7 @@ class TelaListaCondicoesPagamento extends StatelessWidget {
                   leading: CircleAvatar(
                     backgroundColor: Colors.orange.shade100,
                     child: Icon(
-                      Icons.date_range,
+                      Icons.rule_folder,
                       color: Colors.orange.shade800,
                       size: 20,
                     ),
@@ -63,7 +63,10 @@ class TelaListaCondicoesPagamento extends StatelessWidget {
                     nome,
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  subtitle: Text('Intervalo: $intervalo $unidadeTempo'),
+                  subtitle: Text(
+                    '$qtdParcelas Parcela(s) | 1º Venc: $primeiroVencimento dias | Intervalo: $intervalo dias',
+                    style: const TextStyle(fontSize: 12),
+                  ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [

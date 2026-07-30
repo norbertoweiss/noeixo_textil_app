@@ -5,11 +5,12 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 // ============================================================================
-// IMPORTANDO OS BLOCOS DE LEGO
+// IMPORTANDO OS BLOCOS DE LEGO E SERVIÇOS
 // ============================================================================
 import '../../widgets/cards/card_cliente_rota.dart';
 import '../../widgets/smart/barra_filtros_comercial.dart';
-import '../../widgets/smart/filtro_geografico.dart'; // O novo Filtro Multi-Cidades IBGE
+import '../../widgets/smart/filtro_geografico.dart';
+import '../../services/motor_geografico.dart';
 
 class TelaCarteiraClientes extends StatefulWidget {
   final String empresaId;
@@ -23,6 +24,7 @@ class _TelaCarteiraClientesState extends State<TelaCarteiraClientes> {
   String? _idRepresentanteLogado;
   bool _isMaster = false;
   bool _carregandoPerfil = true;
+  List<String> _cidadesAtuacao = [];
 
   @override
   void initState() {
@@ -45,9 +47,21 @@ class _TelaCarteiraClientesState extends State<TelaCarteiraClientes> {
         if (snap.docs.isNotEmpty) {
           final doc = snap.docs.first;
           final dados = doc.data();
+
+          bool isMaster = dados['atendimento_global'] ?? false;
+          List<String> cidadesDaRota = [];
+
+          if (!isMaster) {
+            List<dynamic> regioesDoVendedor = dados['regioes_vinculadas'] ?? [];
+            cidadesDaRota = await MotorGeografico.obterCidadesDaRota(
+              regioesDoVendedor,
+            );
+          }
+
           setState(() {
             _idRepresentanteLogado = doc.id;
-            _isMaster = dados['atendimento_global'] ?? false;
+            _isMaster = isMaster;
+            _cidadesAtuacao = cidadesDaRota;
             _carregandoPerfil = false;
           });
           return;
@@ -99,7 +113,7 @@ class _TelaCarteiraClientesState extends State<TelaCarteiraClientes> {
               ),
               if (_isMaster)
                 const Text(
-                  '👑 Visão de Proprietário (Acesso Global)',
+                  '👑 Visão de Gestão Master (Acesso Global)',
                   style: TextStyle(fontSize: 12, color: Colors.amberAccent),
                 ),
             ],
@@ -122,6 +136,7 @@ class _TelaCarteiraClientesState extends State<TelaCarteiraClientes> {
               representanteId: _idRepresentanteLogado ?? 'DESCONHECIDO',
               empresaId: widget.empresaId,
               isMaster: _isMaster,
+              cidadesAtuacao: _cidadesAtuacao,
             ),
             _AbaNovoClienteBalcao(
               representanteId: _idRepresentanteLogado ?? 'DESCONHECIDO',
@@ -135,17 +150,19 @@ class _TelaCarteiraClientesState extends State<TelaCarteiraClientes> {
 }
 
 // ============================================================================
-// ABA 1: MINHA ROTA
+// ABA 1: MINHA ROTA (COM SUPERPODERES PARA O MASTER)
 // ============================================================================
 class _AbaListaClientes extends StatefulWidget {
   final String representanteId;
   final String empresaId;
   final bool isMaster;
+  final List<String> cidadesAtuacao;
 
   const _AbaListaClientes({
     required this.representanteId,
     required this.empresaId,
     required this.isMaster,
+    required this.cidadesAtuacao,
   });
 
   @override
@@ -156,11 +173,140 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
   String _filtroStatus = 'Todos';
   String _filtroAtivo = 'Ativos';
   String _termoBusca = '';
-  String _filtroRepresentante = 'Todos';
+  List<String> _filtroRepresentantes = [];
 
-  // Variáveis para a Cascata Geográfica
   String _filtroUf = 'Todas';
   List<String> _filtrosCidades = [];
+
+  // Variáveis exclusivas do Vendedor Master
+  List<Map<String, dynamic>> _listaRegioesMaster = [];
+  String? _filtroRegiaoSelecionada;
+  List<String> _cidadesDaRegiaoSelecionada = [];
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.isMaster) {
+      _carregarRegioesParaMaster();
+    }
+  }
+
+  Future<void> _carregarRegioesParaMaster() async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('regioes_venda')
+          .where('ativo', isEqualTo: true)
+          .get();
+
+      List<Map<String, dynamic>> regioes = [];
+      for (var doc in snap.docs) {
+        regioes.add({
+          'id': doc.id,
+          'nome': doc['nome'],
+          'localidades': doc['localidades'] ?? [],
+        });
+      }
+
+      // Ordena alfabeticamente para ficar bonito no menu
+      regioes.sort(
+        (a, b) => a['nome'].toString().compareTo(b['nome'].toString()),
+      );
+
+      if (mounted) {
+        setState(() => _listaRegioesMaster = regioes);
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar regiões para o Master: $e');
+    }
+  }
+
+  // O mesmo motor elástico de limpeza de texto para garantir o cruzamento
+  String _padronizarTexto(String texto) {
+    if (texto.isEmpty) return '';
+    String t = texto.toUpperCase().trim();
+    t = t.replaceAll(RegExp(r'[ÁÀÂÃÄ]'), 'A');
+    t = t.replaceAll(RegExp(r'[ÉÈÊË]'), 'E');
+    t = t.replaceAll(RegExp(r'[ÍÌÎÏ]'), 'I');
+    t = t.replaceAll(RegExp(r'[ÓÒÔÕÖ]'), 'O');
+    t = t.replaceAll(RegExp(r'[ÚÙÛÜ]'), 'U');
+    t = t.replaceAll(RegExp(r'[Ç]'), 'C');
+    return t;
+  }
+
+  Widget _construirFiltroRegiaoMaster() {
+    if (!widget.isMaster || _listaRegioesMaster.isEmpty)
+      return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Container(
+        decoration: BoxDecoration(
+          color: _filtroRegiaoSelecionada != null
+              ? Colors.orange.shade50
+              : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: _filtroRegiaoSelecionada != null
+                ? Colors.orange
+                : Colors.grey.shade300,
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            isExpanded: true,
+            hint: const Text(
+              '👑 Visão Master: Filtrar por Região Demarcada...',
+              style: TextStyle(color: Colors.black54, fontSize: 14),
+            ),
+            value: _filtroRegiaoSelecionada,
+            icon: Icon(
+              Icons.map,
+              color: _filtroRegiaoSelecionada != null
+                  ? Colors.orange
+                  : Colors.grey,
+            ),
+            items: [
+              const DropdownMenuItem<String>(
+                value: null,
+                child: Text(
+                  '❌ Limpar Região (Usar filtro de Estado/Cidade abaixo)',
+                ),
+              ),
+              ..._listaRegioesMaster.map((regiao) {
+                return DropdownMenuItem<String>(
+                  value: regiao['id'],
+                  child: Text('📍 ${regiao['nome']}'),
+                );
+              }).toList(),
+            ],
+            onChanged: (novoValor) {
+              setState(() {
+                _filtroRegiaoSelecionada = novoValor;
+
+                if (novoValor != null) {
+                  // A GANGORRA: Limpa os filtros manuais para evitar conflito
+                  _filtroUf = 'Todas';
+                  _filtrosCidades = [];
+
+                  // Carrega a malha elástica de cidades da região
+                  var regiao = _listaRegioesMaster.firstWhere(
+                    (r) => r['id'] == novoValor,
+                  );
+                  List locs = regiao['localidades'] ?? [];
+                  _cidadesDaRegiaoSelecionada = locs
+                      .map((l) => _padronizarTexto(l['nome'].toString()))
+                      .toList();
+                } else {
+                  _cidadesDaRegiaoSelecionada = [];
+                }
+              });
+            },
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -168,34 +314,25 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
         .collection('clientes')
         .where('empresa_id', isEqualTo: widget.empresaId);
 
-    if (!widget.isMaster) {
+    if (widget.isMaster &&
+        _filtroRepresentantes.isNotEmpty &&
+        _filtroRepresentantes.length <= 30) {
       queryFirebase = queryFirebase.where(
         'representante_id',
-        isEqualTo: widget.representanteId,
+        whereIn: _filtroRepresentantes,
       );
-    } else {
-      if (_filtroRepresentante == 'Minha Carteira') {
-        queryFirebase = queryFirebase.where(
-          'representante_id',
-          isEqualTo: widget.representanteId,
-        );
-      } else if (_filtroRepresentante == 'Base Compartilhada') {
-        queryFirebase = queryFirebase.where(
-          'representante_id',
-          isEqualTo: 'Lista Clientes Importada',
-        );
-      }
     }
 
     return Scaffold(
       body: Column(
         children: [
-          // 1. BARRA COMERCIAL
           BarraFiltrosComercial(
+            empresaId: widget.empresaId,
             termoBusca: _termoBusca,
             filtroAtivo: _filtroAtivo,
             filtroStatus: _filtroStatus,
-            filtroRepresentante: _filtroRepresentante,
+            filtroRepresentantes: _filtroRepresentantes,
+            exibirFiltroVendedor: widget.isMaster,
             opcoesStatus: const [
               'Todos',
               'Aprovado',
@@ -204,82 +341,55 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
               'Bloqueado',
               'Rascunho',
             ],
-            opcoesRepresentante: widget.isMaster
-                ? ['Todos', 'Minha Carteira', 'Base Compartilhada']
-                : ['Minha Carteira'],
             onBuscaChanged: (val) =>
                 setState(() => _termoBusca = val.toLowerCase()),
             onAtivoChanged: (val) => setState(() => _filtroAtivo = val!),
             onStatusChanged: (val) => setState(() => _filtroStatus = val!),
-            onRepresentanteChanged: (val) =>
-                setState(() => _filtroRepresentante = val!),
+            onRepresentantesChanged: (val) =>
+                setState(() => _filtroRepresentantes = val),
           ),
 
-          // 2. FILTRO GEOGRÁFICO
-          FiltroGeograficoMulti(
-            ufSelecionada: _filtroUf,
-            cidadesSelecionadas: _filtrosCidades,
-            onChanged: (novaUf, novasCidades) {
-              setState(() {
-                _filtroUf = novaUf;
-                _filtrosCidades = novasCidades;
-              });
-            },
+          // Novo bloco de filtro superpoderoso do Master
+          _construirFiltroRegiaoMaster(),
+
+          // A Gangorra Visual (Se a Região estiver selecionada, bloqueia este filtro)
+          AbsorbPointer(
+            absorbing: _filtroRegiaoSelecionada != null,
+            child: Opacity(
+              opacity: _filtroRegiaoSelecionada != null ? 0.4 : 1.0,
+              child: FiltroGeograficoMulti(
+                ufSelecionada: _filtroUf,
+                cidadesSelecionadas: _filtrosCidades,
+                onChanged: (novaUf, novasCidades) {
+                  setState(() {
+                    _filtroUf = novaUf;
+                    _filtrosCidades = novasCidades;
+                  });
+                },
+              ),
+            ),
           ),
 
           const Divider(height: 1, thickness: 1),
 
-          // 3. A LISTA DE DADOS DO BANCO
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: queryFirebase.snapshots(),
               builder: (context, snapshot) {
-                if (snapshot.hasError)
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Text(
-                        'Erro do Firebase: ${snapshot.error}',
-                        style: const TextStyle(color: Colors.red),
-                      ),
-                    ),
-                  );
-                if (snapshot.connectionState == ConnectionState.waiting)
+                if (snapshot.hasError) {
+                  return Center(child: Text('Erro: ${snapshot.error}'));
+                }
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty)
+                }
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return const Center(
                     child: Text(
-                      'Nenhum cliente na base de dados para esta rota.',
+                      'Nenhum cliente atende aos filtros.',
                       style: TextStyle(color: Colors.grey),
                     ),
                   );
-
-                // ========================================================================
-                // Lendo as chaves corretas da importação para o Filtro!
-                // ========================================================================
-                List<Map<String, String>> locaisDaBase = snapshot.data!.docs
-                    .map((doc) {
-                      var data = doc.data() as Map<String, dynamic>;
-                      return {
-                        'uf':
-                            (data['estado'] ??
-                                    data['uf_fiscal'] ??
-                                    data['uf'] ??
-                                    '')
-                                .toString()
-                                .toUpperCase()
-                                .trim(),
-                        'cidade':
-                            (data['cidade'] ??
-                                    data['cidade_fiscal'] ??
-                                    data['municipio'] ??
-                                    '')
-                                .toString()
-                                .toUpperCase()
-                                .trim(),
-                      };
-                    })
-                    .toList();
+                }
 
                 var docsFiltrados = snapshot.data!.docs.where((doc) {
                   var data = doc.data() as Map<String, dynamic>;
@@ -290,20 +400,20 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
                       .toString()
                       .toLowerCase();
 
-                  // Mapeamento elástico para a checagem interna
-                  String ufCliente =
-                      (data['estado'] ?? data['uf_fiscal'] ?? data['uf'] ?? '')
-                          .toString()
-                          .toUpperCase()
-                          .trim();
-                  String cidadeCliente =
+                  String cidadeOriginal =
                       (data['cidade'] ??
                               data['cidade_fiscal'] ??
                               data['municipio'] ??
                               '')
-                          .toString()
-                          .toUpperCase()
-                          .trim();
+                          .toString();
+                  String ufOriginal =
+                      (data['estado'] ?? data['uf_fiscal'] ?? data['uf'] ?? '')
+                          .toString();
+
+                  String ufClienteLimpa = ufOriginal.toUpperCase().trim();
+                  String cidadeClienteLimpa = cidadeOriginal
+                      .toUpperCase()
+                      .trim();
 
                   String statusCreditoDB =
                       data['status_credito'] ?? 'Em Análise';
@@ -314,6 +424,37 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
 
                   bool isRascunho = data['is_rascunho'] ?? false;
                   bool isAtivo = data['ativo'] ?? true;
+
+                  // =========================================================
+                  // O CÉREBRO GEOGRÁFICO: SEPARAÇÃO DE MASTER E VENDEDOR
+                  // =========================================================
+                  if (!widget.isMaster) {
+                    // VENDEDOR COMUM: Só enxerga a própria rota restrita
+                    if (widget.cidadesAtuacao.isEmpty) return false;
+                    if (!widget.cidadesAtuacao.contains(cidadeClienteLimpa))
+                      return false;
+                  } else {
+                    // MASTER (Sérgio)
+                    if (_filtroRepresentantes.isNotEmpty &&
+                        _filtroRepresentantes.length > 30) {
+                      String repAtual = (data['representante_id'] ?? 'BOLSÃO')
+                          .toString();
+                      if (repAtual == 'Lista Clientes Importada' ||
+                          repAtual.trim().isEmpty)
+                        repAtual = 'BOLSÃO';
+                      if (!_filtroRepresentantes.contains(repAtual))
+                        return false;
+                    }
+
+                    // Se a GANGORRA DA REGIÃO estiver ativa
+                    if (_filtroRegiaoSelecionada != null) {
+                      String chaveMestra = _padronizarTexto(
+                        '$cidadeOriginal - $ufOriginal',
+                      );
+                      if (!_cidadesDaRegiaoSelecionada.contains(chaveMestra))
+                        return false;
+                    }
+                  }
 
                   if (razao.isEmpty || razao == 'null' || razao == 'undefined')
                     return false;
@@ -332,17 +473,18 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
                       return false;
                   }
 
-                  // TRAVAS GEOGRÁFICAS
-                  if (_filtroUf != 'Todas' && ufCliente != _filtroUf)
-                    return false;
-                  if (_filtrosCidades.isNotEmpty &&
-                      !_filtrosCidades.contains(cidadeCliente))
-                    return false;
+                  // Se a GANGORRA MANUAL (Estado/Cidade) estiver ativa, a Região é nula
+                  if (_filtroRegiaoSelecionada == null) {
+                    if (_filtroUf != 'Todas' && ufClienteLimpa != _filtroUf)
+                      return false;
+                    if (_filtrosCidades.isNotEmpty &&
+                        !_filtrosCidades.contains(cidadeClienteLimpa))
+                      return false;
+                  }
 
                   return true;
                 }).toList();
 
-                // ORDENAÇÃO TRIPLA
                 docsFiltrados.sort((a, b) {
                   var dataA = a.data() as Map<String, dynamic>;
                   var dataB = b.data() as Map<String, dynamic>;
@@ -363,7 +505,6 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
                           .toString()
                           .toUpperCase()
                           .trim();
-
                   int comparaUf = ufA.compareTo(ufB);
                   if (comparaUf != 0) return comparaUf;
 
@@ -383,7 +524,6 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
                           .toString()
                           .toUpperCase()
                           .trim();
-
                   int comparaCid = cidA.compareTo(cidB);
                   if (comparaCid != 0) return comparaCid;
 
@@ -396,13 +536,14 @@ class _AbaListaClientesState extends State<_AbaListaClientes> {
                   return nomeA.compareTo(nomeB);
                 });
 
-                if (docsFiltrados.isEmpty)
+                if (docsFiltrados.isEmpty) {
                   return const Center(
                     child: Text(
                       'Nenhum cliente atende à sua combinação de filtros.',
                       style: TextStyle(color: Colors.grey),
                     ),
                   );
+                }
 
                 return ListView.builder(
                   itemCount: docsFiltrados.length,
@@ -474,7 +615,7 @@ class _AbaNovoClienteBalcaoState extends State<_AbaNovoClienteBalcao> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['descricao_situacao_cadastral'] != 'ATIVA') {
-          if (mounted)
+          if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
@@ -483,22 +624,25 @@ class _AbaNovoClienteBalcaoState extends State<_AbaNovoClienteBalcao> {
                 backgroundColor: Colors.red,
               ),
             );
+          }
         }
         setState(() {
           _dadosReceita = data;
           _cnpjValidado = true;
         });
       } else {
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('CNPJ não encontrado.')));
+        }
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Erro: $e')));
+      }
     } finally {
       setState(() => _buscandoCNPJ = false);
     }
@@ -522,12 +666,17 @@ class _AbaNovoClienteBalcaoState extends State<_AbaNovoClienteBalcao> {
           'cnpj': _cnpjCtrl.text.replaceAll(RegExp(r'[^0-9]'), ''),
           'razao_social': razaoReceita,
           'nome_fantasia': _dadosReceita['nome_fantasia'] ?? '',
-          'cep_fiscal': _dadosReceita['cep'] ?? '',
-          'rua_fiscal': _dadosReceita['logradouro'] ?? '',
-          'num_fiscal': _dadosReceita['numero'] ?? '',
-          'bairro_fiscal': _dadosReceita['bairro'] ?? '',
-          'cidade_fiscal': _dadosReceita['municipio'] ?? '',
-          'uf_fiscal': _dadosReceita['uf'] ?? '',
+
+          // ==============================================================
+          // CORREÇÃO CRÍTICA APLICADA: GRAVANDO COM AS CHAVES DEFINITIVAS
+          // ==============================================================
+          'cep': _dadosReceita['cep'] ?? '',
+          'logradouro': _dadosReceita['logradouro'] ?? '',
+          'numero': _dadosReceita['numero'] ?? '',
+          'bairro': _dadosReceita['bairro'] ?? '',
+          'cidade': _dadosReceita['municipio'] ?? '',
+          'estado': _dadosReceita['uf'] ?? '',
+
           'grupo_economico': _redeCtrl.text,
           'contato_comprador': _compradorCtrl.text,
           'whatsapp': _whatsCtrl.text,
@@ -542,10 +691,11 @@ class _AbaNovoClienteBalcaoState extends State<_AbaNovoClienteBalcao> {
           _limparFormulario();
         }
       } catch (e) {
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text('Erro: $e')));
+        }
       } finally {
         if (mounted) setState(() => _salvando = false);
       }

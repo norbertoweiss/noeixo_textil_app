@@ -8,7 +8,7 @@ class MotorIndicadores extends StatelessWidget {
   final String termoBusca;
   final String filtroAtivo;
   final String filtroStatus;
-  final String filtroRepresentante;
+  final List<String> filtroRepresentantes;
 
   const MotorIndicadores({
     super.key,
@@ -16,26 +16,15 @@ class MotorIndicadores extends StatelessWidget {
     required this.termoBusca,
     required this.filtroAtivo,
     required this.filtroStatus,
-    required this.filtroRepresentante,
+    required this.filtroRepresentantes,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Busca todo o universo da empresa de forma simples e rápida
     Query query = FirebaseFirestore.instance
         .collection('clientes')
         .where('empresa_id', isEqualTo: empresaId);
-
-    if (filtroRepresentante != 'Todos') {
-      query = query.where('representante_id', isEqualTo: filtroRepresentante);
-    }
-    if (filtroAtivo == 'Ativos') {
-      query = query.where('ativo', isEqualTo: true);
-    } else if (filtroAtivo == 'Inativos') {
-      query = query.where('ativo', isEqualTo: false);
-    }
-    if (filtroStatus != 'Todos') {
-      query = query.where('status_credito', isEqualTo: filtroStatus);
-    }
 
     return StreamBuilder<QuerySnapshot>(
       stream: query.snapshots(),
@@ -48,33 +37,81 @@ class MotorIndicadores extends StatelessWidget {
           );
         }
 
-        var docs = snapshot.data!.docs;
+        // =====================================================================
+        // ESPELHAMENTO DE FILTROS (Igualzinho ao MotorListaClientes)
+        // Isso garante que o painel mostre exatamente os números da lista abaixo
+        // =====================================================================
+        var docsFiltrados = snapshot.data!.docs.where((doc) {
+          var data = doc.data() as Map<String, dynamic>;
 
-        if (termoBusca.isNotEmpty) {
-          docs = docs.where((doc) {
-            var d = doc.data() as Map<String, dynamic>;
-            String razao = (d['razao_social'] ?? '').toString().toLowerCase();
-            String fantasia = (d['nome_fantasia'] ?? '')
-                .toString()
-                .toLowerCase();
-            String cnpj = (d['cnpj'] ?? '').toString();
-            String ie = (d['ie'] ?? '').toString().toLowerCase();
+          String razao = (data['razao_social'] ?? '').toString().toLowerCase();
+          String fantasia = (data['nome_fantasia'] ?? '')
+              .toString()
+              .toLowerCase();
+          String cnpj = (data['cnpj'] ?? '').toString();
+          String ie = (data['ie'] ?? '').toString().toLowerCase();
+
+          String statusCreditoDB = data['status_credito'] ?? 'Em Análise';
+          String statusCreditoUI =
+              (statusCreditoDB == 'Pendente Enriquecimento')
+              ? 'Pendente Cadastro'
+              : statusCreditoDB;
+
+          bool isRascunho = data['is_rascunho'] ?? false;
+          bool isAtivo = data['ativo'] ?? true;
+
+          String repAtual = (data['representante_id'] ?? 'BOLSÃO').toString();
+          if (repAtual == 'Lista Clientes Importada' ||
+              repAtual.trim().isEmpty) {
+            repAtual = 'BOLSÃO';
+          }
+
+          // Aplica o filtro múltiplo de Vendedores
+          if (filtroRepresentantes.isNotEmpty &&
+              !filtroRepresentantes.contains(repAtual)) {
+            return false;
+          }
+
+          // Aplica o filtro de Operação (Ativo/Inativo)
+          if (filtroAtivo == 'Ativos' && !isAtivo) return false;
+          if (filtroAtivo == 'Inativos' && isAtivo) return false;
+
+          // Aplica o filtro de Crédito
+          if (filtroStatus == 'Rascunho' && !isRascunho) return false;
+          if (filtroStatus != 'Todos' && filtroStatus != 'Rascunho') {
+            if (isRascunho || statusCreditoUI != filtroStatus) return false;
+          }
+
+          // Aplica a Busca por Texto
+          if (termoBusca.isNotEmpty) {
             String busca = termoBusca.toLowerCase();
-            return razao.contains(busca) ||
-                fantasia.contains(busca) ||
-                cnpj.contains(busca) ||
-                ie.contains(busca);
-          }).toList();
-        }
+            if (!razao.contains(busca) &&
+                !fantasia.contains(busca) &&
+                !cnpj.contains(busca) &&
+                !ie.contains(busca)) {
+              return false;
+            }
+          }
 
-        int total = docs.length;
+          return true;
+        }).toList();
 
-        int naFila = docs.where((d) {
+        // =====================================================================
+        // CÁLCULO DOS INDICADORES COM BASE NA LISTA JÁ FILTRADA
+        // =====================================================================
+
+        // 1. Total Base: Quantidade de clientes que sobrou após os filtros
+        int total = docsFiltrados.length;
+
+        // 2. Fila de Distrib: Quantos desses filtrados estão no Bolsão
+        int naFila = docsFiltrados.where((d) {
           var data = d.data() as Map<String, dynamic>;
-          return data['representante_id'] == 'Lista Clientes Importada';
+          String r = (data['representante_id'] ?? 'BOLSÃO').toString();
+          return r == 'BOLSÃO' || r == 'Lista Clientes Importada';
         }).length;
 
-        int emAnalise = docs.where((d) {
+        // 3. Em Análise: Quantos desses filtrados estão pendentes
+        int emAnalise = docsFiltrados.where((d) {
           var data = d.data() as Map<String, dynamic>;
           return data['status_credito'] == 'Pendente Enriquecimento';
         }).length;

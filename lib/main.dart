@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'firebase_options.dart';
 
@@ -15,9 +16,9 @@ import 'screens/engenharia/tela_lista_processos.dart';
 import 'screens/engenharia/tela_lista_produtos.dart';
 import 'screens/engenharia/tela_lista_fichas.dart';
 
-// O Módulo Comercial agora é importado limpo de um único ponto
 import 'screens/comercial/tela_comercial_menu.dart';
-import 'screens/comercial/tela_aprovacao_cliente.dart'; // Mantido para o link mágico
+import 'screens/comercial/tela_aprovacao_cliente.dart';
+import 'screens/pcp/tela_maestro_pcp.dart';
 
 import 'gestao_sistema/telas/tela_dashboard_admin.dart';
 import 'screens/autenticacao/tela_login.dart';
@@ -38,7 +39,7 @@ class NoEixoTextilApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'NoEixo Têxtil',
+      title: 'NoEixo ERP', // Tornando o nome global
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -55,20 +56,13 @@ class NoEixoTextilApp extends StatelessWidget {
         ),
       ),
       debugShowCheckedModeBanner: false,
-
-      // =========================================================================
-      // INTERCEPTADOR DE ROTA INICIAL (Bypass de Segurança para o Cliente)
-      // O 'home: const TelaLogin()' foi removido para evitar o conflito!
-      // =========================================================================
       onGenerateInitialRoutes: (String initialRouteName) {
-        // 1. Se a pessoa chegou pelo link mágico do WhatsApp...
         if (initialRouteName.startsWith('/aprovar')) {
           final uri = Uri.parse(initialRouteName);
           final idPedido = uri.queryParameters['id'];
           final tokenValida = uri.queryParameters['token'];
 
           if (idPedido != null && tokenValida != null) {
-            // Entrega APENAS a tela de aprovação. O Login não carrega por baixo.
             return [
               MaterialPageRoute(
                 builder: (context) => TelaAprovacaoCliente(
@@ -79,12 +73,10 @@ class NoEixoTextilApp extends StatelessWidget {
             ];
           }
         }
-
-        // 2. Se NÃO for o link de aprovação (acesso normal do funcionário), carrega a Tela de Login
-        return [MaterialPageRoute(builder: (context) => const TelaLogin())];
+        return [
+          MaterialPageRoute(builder: (context) => const RoteadorAutenticacao()),
+        ];
       },
-
-      // Fallback de navegação interna mantido
       onGenerateRoute: (settings) {
         if (settings.name != null && settings.name!.startsWith('/aprovar')) {
           final uri = Uri.parse(settings.name!);
@@ -99,6 +91,29 @@ class NoEixoTextilApp extends StatelessWidget {
           }
         }
         return null;
+      },
+    );
+  }
+}
+
+class RoteadorAutenticacao extends StatelessWidget {
+  const RoteadorAutenticacao({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Colors.blueGrey,
+            body: Center(child: CircularProgressIndicator(color: Colors.white)),
+          );
+        }
+        if (snapshot.hasData && snapshot.data != null) {
+          return TelaPrincipal(emailUser: snapshot.data!.email);
+        }
+        return const TelaLogin();
       },
     );
   }
@@ -161,6 +176,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             .toList();
 
         if (perfil == 'admin_noeixo') {
+          // ADICIONADO O MÓDULO DE LOGÍSTICA AQUI
           final todasAsAbas = [
             'Dashboard',
             'Suprimentos',
@@ -168,6 +184,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             'Engenharia',
             'PCP',
             'Produção',
+            'Logística', // <-- NOVO
             'Financeiro',
             'RH',
           ];
@@ -256,52 +273,59 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
       ModuloItem(
         nomeChave: 'Suprimentos',
         icone: Icons.shopping_cart,
-        tituloExibicao: 'Suprimentos',
+        tituloExibicao: 'Suprimentos & Matéria-Prima',
         telaWidget: const TelaSuprimentosMenu(),
       ),
       ModuloItem(
         nomeChave: 'Comercial',
         icone: Icons.sell,
-        tituloExibicao: 'Comercial',
+        tituloExibicao: 'Vendas & CRM',
         telaWidget: TelaComercialMenu(empresaId: empresaId),
       ),
       ModuloItem(
         nomeChave: 'Engenharia',
         icone: Icons.architecture,
-        tituloExibicao: 'Engenharia & Modelagem',
+        tituloExibicao: 'Engenharia de Produto',
         telaWidget: TelaEngenhariaMenu(empresaId: empresaId),
       ),
       ModuloItem(
         nomeChave: 'PCP',
         icone: Icons.settings_input_component,
         tituloExibicao: 'Maestro PCP',
-        telaWidget: const Center(
-          child: Text('🏭 Maestro PCP', style: TextStyle(fontSize: 20)),
-        ),
+        telaWidget: TelaMaestroPCP(empresaId: empresaId),
       ),
       ModuloItem(
         nomeChave: 'Produção',
-        icone: Icons.checkroom,
+        icone: Icons.precision_manufacturing,
         tituloExibicao: 'Chão de Fábrica',
         telaWidget: const Center(
-          child: Text('🧵 Produção', style: TextStyle(fontSize: 20)),
+          child: Text(
+            '⚙️ Apontamento de Produção',
+            style: TextStyle(fontSize: 20),
+          ),
         ),
+      ),
+      // =========================================================================
+      // NOVO MÓDULO INJETADO NA ESTRUTURA
+      // =========================================================================
+      ModuloItem(
+        nomeChave: 'Logística',
+        icone: Icons.local_shipping,
+        tituloExibicao: 'Logística & Expedição',
+        telaWidget: const TelaLogisticaMenu(),
       ),
       ModuloItem(
         nomeChave: 'Financeiro',
         icone: Icons.payments,
         tituloExibicao: 'Gestão Financeira',
-        telaWidget: const TelaFinanceiroMenu(),
+        telaWidget: TelaFinanceiroMenu(empresaId: empresaId),
       ),
       ModuloItem(
         nomeChave: 'RH',
         icone: Icons.badge_outlined,
-        tituloExibicao: 'Recursos Humanos Industrial',
+        tituloExibicao: 'Recursos Humanos',
         telaWidget: const Center(
-          child: Text(
-            '👥 Módulo RH Operacional (Opcional)',
-            style: TextStyle(fontSize: 20),
-          ),
+          child: Text('👥 Módulo RH', style: TextStyle(fontSize: 20)),
         ),
       ),
     ];
@@ -345,7 +369,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
               decoration: BoxDecoration(color: Colors.blueGrey),
               child: Center(
                 child: Text(
-                  'NoEixo Têxtil',
+                  'NoEixo ERP',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 24,
@@ -415,7 +439,7 @@ class _TelaPrincipalState extends State<TelaPrincipal> {
             const Padding(
               padding: EdgeInsets.all(16.0),
               child: Text(
-                'v 1.8.3 - Multi-Tenant Seguro',
+                'v 1.9.0 - Multi-Setorial',
                 style: TextStyle(color: Colors.grey, fontSize: 12),
               ),
             ),
@@ -468,6 +492,59 @@ Widget _botaoMenuResponsivo(
       ),
     ),
   );
+}
+
+// =========================================================================
+// TELA DO SUB-MENU: LOGÍSTICA & EXPEDIÇÃO (NOVA)
+// =========================================================================
+class TelaLogisticaMenu extends StatelessWidget {
+  const TelaLogisticaMenu({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    double largura = MediaQuery.of(context).size.width;
+    int colunas = largura > 800 ? 4 : 2;
+    return GridView.count(
+      padding: const EdgeInsets.all(20),
+      crossAxisCount: colunas,
+      crossAxisSpacing: 15,
+      mainAxisSpacing: 15,
+      children: [
+        _botaoMenuResponsivo(
+          context,
+          'Estoque Produto Acabado',
+          Icons.inventory_2,
+          Colors.blueGrey,
+          Scaffold(
+            appBar: AppBar(title: const Text('Estoque Produto Acabado')),
+          ), // Temporário até criarmos a tela
+        ),
+        _botaoMenuResponsivo(
+          context,
+          'Separação (Picking)',
+          Icons.checklist_rtl,
+          Colors.indigo,
+          Scaffold(appBar: AppBar(title: const Text('Separação de Pedidos'))),
+        ),
+        _botaoMenuResponsivo(
+          context,
+          'Embalagem (Packing)',
+          Icons.all_inbox,
+          Colors.teal,
+          Scaffold(
+            appBar: AppBar(title: const Text('Embalagem & Conferência')),
+          ),
+        ),
+        _botaoMenuResponsivo(
+          context,
+          'Despacho & Romaneios',
+          Icons.local_shipping,
+          Colors.brown,
+          Scaffold(appBar: AppBar(title: const Text('Despacho de Carga'))),
+        ),
+      ],
+    );
+  }
 }
 
 class TelaSuprimentosMenu extends StatelessWidget {

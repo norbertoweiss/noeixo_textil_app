@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:noeixo_textil_app/screens/comercial/gestao/tela_lista_politicas_comerciais.dart';
+import 'package:noeixo_textil_app/screens/configuracoes/tela_configuracao_checklist.dart';
 import 'tela_lista_formas_pagamento.dart';
-import 'tela_lista_condicoes_pagamento.dart'; // NOVA IMPORTAÇÃO
+import 'tela_lista_condicoes_pagamento.dart';
+
+// ATENÇÃO: Ajuste este caminho de importação conforme a estrutura de pastas do seu projeto
 
 class TelaCadastrosFinanceiro extends StatelessWidget {
-  const TelaCadastrosFinanceiro({super.key});
+  final String empresaId; // <-- ADICIONADO PARA O MULTI-TENANT
+
+  const TelaCadastrosFinanceiro({super.key, required this.empresaId});
 
   @override
   Widget build(BuildContext context) {
@@ -16,6 +22,68 @@ class TelaCadastrosFinanceiro extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // ==============================================================
+          // NOVO: ACESSO À MÁQUINA DE POLÍTICAS COMERCIAIS
+          // ==============================================================
+          ListTile(
+            leading: const CircleAvatar(
+              backgroundColor: Colors.blueGrey,
+              child: Icon(Icons.gavel, color: Colors.white),
+            ),
+            title: const Text(
+              'Políticas Comerciais e Comissões',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: const Text(
+              'Configure regras de desconto e escalonamento de comissões',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      TelaListaPoliticasComerciais(empresaId: empresaId),
+                ),
+              );
+            },
+          ),
+          const Divider(),
+
+          // ==============================================================
+          // ACESSO AO CONSTRUTOR DE CHECKLIST DO FINANCEIRO
+          // ==============================================================
+          ListTile(
+            leading: const CircleAvatar(
+              backgroundColor: Colors.indigo,
+              child: Icon(Icons.rule_folder, color: Colors.white),
+            ),
+            title: const Text(
+              'Regras de Aprovação (Checklist)',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: const Text(
+              'Configure as perguntas de análise de crédito',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => TelaConfiguracaoChecklist(
+                    // <-- "const" REMOVIDO PARA PODER RECEBER A VARIÁVEL
+                    empresaId: empresaId, // <-- REPASSANDO PARA O CHECKLIST
+                    setorAcesso: 'Financeiro',
+                  ),
+                ),
+              );
+            },
+          ),
+          const Divider(),
+
+          // ==============================================================
+          // FORMAS DE PAGAMENTO
+          // ==============================================================
           ListTile(
             leading: const CircleAvatar(
               backgroundColor: Colors.teal,
@@ -37,6 +105,10 @@ class TelaCadastrosFinanceiro extends StatelessWidget {
             },
           ),
           const Divider(),
+
+          // ==============================================================
+          // CONDIÇÕES DE PAGAMENTO (PRAZOS E MATEMÁTICA)
+          // ==============================================================
           ListTile(
             leading: const CircleAvatar(
               backgroundColor: Colors.orange,
@@ -49,7 +121,6 @@ class TelaCadastrosFinanceiro extends StatelessWidget {
             subtitle: const Text('À Vista, 30/60/90, Parcelamentos...'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
-              // AGORA ABRE A LISTA DE CONDIÇÕES!
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -59,6 +130,10 @@ class TelaCadastrosFinanceiro extends StatelessWidget {
             },
           ),
           const Divider(),
+
+          // ==============================================================
+          // CONTAS BANCÁRIAS (FUTURO)
+          // ==============================================================
           ListTile(
             leading: const CircleAvatar(
               backgroundColor: Colors.grey,
@@ -70,7 +145,11 @@ class TelaCadastrosFinanceiro extends StatelessWidget {
             ),
             subtitle: const Text('Em breve'),
             trailing: const Icon(Icons.lock, color: Colors.grey),
-            onTap: () {},
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Módulo em desenvolvimento.')),
+              );
+            },
           ),
         ],
       ),

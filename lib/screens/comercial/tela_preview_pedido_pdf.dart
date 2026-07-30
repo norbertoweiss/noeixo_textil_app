@@ -8,6 +8,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../services/pedido_service.dart';
+
 class TelaPreviewPedidoPDF extends StatefulWidget {
   final Map<String, dynamic> dadosPedido;
 
@@ -47,14 +49,9 @@ class _TelaPreviewPedidoPDFState extends State<TelaPreviewPedidoPDF> {
       _fonteNegrito = pw.Font.helveticaBold();
     }
 
-    if (mounted) {
-      setState(() => _carregandoFontes = false);
-    }
+    if (mounted) setState(() => _carregandoFontes = false);
   }
 
-  // =========================================================================
-  // O MOTOR QUE DESENHA O PDF COM FOTOS (FOLHA A4)
-  // =========================================================================
   Future<Uint8List> _gerarPdf(PdfPageFormat format) async {
     final pdf = pw.Document();
     final dados = widget.dadosPedido;
@@ -64,6 +61,12 @@ class _TelaPreviewPedidoPDFState extends State<TelaPreviewPedidoPDF> {
     final corAlerta = PdfColors.purple;
     final corTabela = PdfColors.teal;
     final corTextoTabela = PdfColors.white;
+
+    // ========================================================
+    // PREPARANDO AS VARIÁVEIS DE OBSERVAÇÃO
+    // ========================================================
+    final String observacoesVendedor = dados['observacoes']?.toString() ?? '';
+    final List historico = dados['historico_mensagens'] ?? [];
 
     pdf.addPage(
       pw.MultiPage(
@@ -310,6 +313,66 @@ class _TelaPreviewPedidoPDFState extends State<TelaPreviewPedidoPDF> {
               ),
             ),
 
+            pw.SizedBox(height: 20),
+
+            // ========================================================
+            // NOVO: CAIXA PROFISSIONAL DE HISTÓRICO NO PDF
+            // ========================================================
+            if (historico.isNotEmpty || observacoesVendedor.isNotEmpty)
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.grey100,
+                  borderRadius: const pw.BorderRadius.all(
+                    pw.Radius.circular(6),
+                  ),
+                  border: pw.Border.all(color: PdfColors.grey300),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'HISTÓRICO E OBSERVAÇÕES',
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.blueGrey800,
+                      ),
+                    ),
+                    pw.SizedBox(height: 6),
+                    ...historico.map((h) {
+                      String autor = h['autor'] == 'CLIENTE'
+                          ? 'Cliente'
+                          : 'Gestor/Vendedor';
+                      String msg = h['mensagem'] ?? '';
+                      return pw.Padding(
+                        padding: const pw.EdgeInsets.only(bottom: 4),
+                        child: pw.Text(
+                          '$autor: $msg',
+                          style: const pw.TextStyle(
+                            fontSize: 9,
+                            color: PdfColors.grey700,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                    if (observacoesVendedor.isNotEmpty)
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.only(top: 4),
+                        child: pw.Text(
+                          'Vendedor: $observacoesVendedor',
+                          style: pw.TextStyle(
+                            fontSize: 9,
+                            fontWeight: pw.FontWeight.bold,
+                            color: PdfColors.black,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
             pw.SizedBox(height: 40),
             pw.Center(
               child: pw.Text(
@@ -326,9 +389,6 @@ class _TelaPreviewPedidoPDFState extends State<TelaPreviewPedidoPDF> {
     return pdf.save();
   }
 
-  // =========================================================================
-  // MÁQUINA DE WHATSAPP: GERAÇÃO DE LINK E DISPARO DIRETO
-  // =========================================================================
   Future<void> _abrirWhatsAppComLink(
     String idPedido,
     String tokenAprovacao,
@@ -336,27 +396,22 @@ class _TelaPreviewPedidoPDFState extends State<TelaPreviewPedidoPDF> {
   ) async {
     String linkAprovacao =
         "https://noeixo-textil.web.app/#/aprovar?id=$idPedido&token=$tokenAprovacao";
-
     String nomeCliente = dados['clienteNome'] ?? 'Cliente';
-    double valor = (dados['valorFinalCobrado'] ?? 0).toDouble();
 
-    // EXTRAÇÃO E LIMPEZA DO NÚMERO RESTAURADA!
     String telefoneBruto = dados['whatsapp']?.toString() ?? '';
     String telefoneLimpo = telefoneBruto.replaceAll(RegExp(r'[^0-9]'), '');
 
-    // Injeta DDI do Brasil (55) se o vendedor digitou só o DDD (ex: 4799999999)
     if (telefoneLimpo.length == 10 || telefoneLimpo.length == 11) {
       telefoneLimpo = '55$telefoneLimpo';
     }
 
     String mensagem =
         "Olá, $nomeCliente!\n\n"
-        "A *World Baby Kids* Agradece.\n"
-        "Clique no link para ver seu pedido:\n"
+        "A *World Baby Kids* Agradece o seu pedido.\n"
+        "Clique no link seguro abaixo para conferir as quantidades e autorizar o envio para a fábrica:\n"
         "👉 $linkAprovacao\n\n"
         "Qualquer dúvida, estou à disposição!";
 
-    // ROTEAMENTO INTELIGENTE
     String urlWhatsApp;
     if (telefoneLimpo.isNotEmpty) {
       urlWhatsApp =
@@ -390,31 +445,28 @@ class _TelaPreviewPedidoPDFState extends State<TelaPreviewPedidoPDF> {
 
   Future<void> _salvarPedidoOficial() async {
     setState(() => _salvando = true);
-    final db = FirebaseFirestore.instance;
-    final dados = widget.dadosPedido;
+
+    final dados = Map<String, dynamic>.from(widget.dadosPedido);
 
     try {
       String tokenAprovacao = DateTime.now().millisecondsSinceEpoch.toString();
-      DocumentReference refPedido = db.collection('pedidos_venda').doc();
-
-      dados.remove('dataEntregaStr');
-      dados.remove('statusPrevisto');
-
-      dados['dataPedido'] = FieldValue.serverTimestamp();
-      dados['tokenAprovacao'] = tokenAprovacao;
 
       dados['status'] = (dados['descontoRealAplicadoPerc'] ?? 0) > 25.01
           ? 'SOB ANÁLISE (DIRETORIA)'
           : 'AGUARDANDO APROVAÇÃO DO CLIENTE';
 
-      await refPedido.set(dados);
+      final pedidoService = PedidoService();
+      String pedidoId = await pedidoService.salvarPedidoOficial(
+        dadosPedido: dados,
+        tokenAprovacao: tokenAprovacao,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               dados['status'] == 'SOB ANÁLISE (DIRETORIA)'
-                  ? 'Pedido enviado para a Diretoria.'
+                  ? 'Pedido travado. Enviado para a Diretoria.'
                   : 'Pedido salvo! Abrindo o WhatsApp...',
             ),
             backgroundColor: dados['status'] == 'SOB ANÁLISE (DIRETORIA)'
@@ -424,20 +476,21 @@ class _TelaPreviewPedidoPDFState extends State<TelaPreviewPedidoPDF> {
         );
 
         if (dados['status'] == 'AGUARDANDO APROVAÇÃO DO CLIENTE') {
-          await _abrirWhatsAppComLink(refPedido.id, tokenAprovacao, dados);
+          await _abrirWhatsAppComLink(pedidoId, tokenAprovacao, dados);
         }
 
         Navigator.of(context).pop();
         Navigator.of(context).pop();
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erro ao salvar: $e'),
+            content: Text('Erro ao salvar o pedido: $e'),
             backgroundColor: Colors.red,
           ),
         );
+      }
     } finally {
       if (mounted) setState(() => _salvando = false);
     }

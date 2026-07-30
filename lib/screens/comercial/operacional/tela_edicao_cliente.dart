@@ -19,41 +19,77 @@ class TelaEdicaoClienteCompleta extends StatefulWidget {
 class _TelaEdicaoClienteCompletaState extends State<TelaEdicaoClienteCompleta> {
   final _formKey = GlobalKey<FormState>();
   bool _salvando = false;
-  bool _isAtivo = true;
+  late bool _isAtivo;
 
-  final _razaoCtrl = TextEditingController();
-  final _fantasiaCtrl = TextEditingController();
-  final _cnpjCtrl = TextEditingController();
-  final _ieCtrl = TextEditingController();
-  final _cepCtrl = TextEditingController();
-  final _ruaCtrl = TextEditingController();
-  final _numCtrl = TextEditingController();
-  final _bairroCtrl = TextEditingController();
-  final _cidadeCtrl = TextEditingController();
-  final _ufCtrl = TextEditingController();
-  final _grupoCtrl = TextEditingController();
-  final _compradorCtrl = TextEditingController();
-  final _whatsCtrl = TextEditingController();
-  final _emailCtrl = TextEditingController();
+  // =========================================================================
+  // CONTROLADORES
+  // =========================================================================
+  late final TextEditingController _razaoCtrl;
+  late final TextEditingController _fantasiaCtrl;
+  late final TextEditingController _cnpjCtrl;
+  late final TextEditingController _ieCtrl;
+  late final TextEditingController _cepCtrl;
+  late final TextEditingController _ruaCtrl;
+  late final TextEditingController _numCtrl;
+  late final TextEditingController _bairroCtrl;
+  late final TextEditingController _cidadeCtrl;
+  late final TextEditingController _ufCtrl;
+  late final TextEditingController _grupoCtrl;
+  late final TextEditingController _compradorCtrl;
+  late final TextEditingController _whatsCtrl;
+  late final TextEditingController _telefoneFixoCtrl; // NOVO CAMPO
+  late final TextEditingController _emailCtrl;
 
   @override
   void initState() {
     super.initState();
-    _isAtivo = widget.dadosIniciais['ativo'] ?? true;
-    _razaoCtrl.text = widget.dadosIniciais['razao_social'] ?? '';
-    _fantasiaCtrl.text = widget.dadosIniciais['nome_fantasia'] ?? '';
-    _cnpjCtrl.text = widget.dadosIniciais['cnpj'] ?? '';
-    _ieCtrl.text = widget.dadosIniciais['inscricao_estadual'] ?? '';
-    _cepCtrl.text = widget.dadosIniciais['cep_fiscal'] ?? '';
-    _ruaCtrl.text = widget.dadosIniciais['rua_fiscal'] ?? '';
-    _numCtrl.text = widget.dadosIniciais['num_fiscal'] ?? '';
-    _bairroCtrl.text = widget.dadosIniciais['bairro_fiscal'] ?? '';
-    _cidadeCtrl.text = widget.dadosIniciais['cidade_fiscal'] ?? '';
-    _ufCtrl.text = widget.dadosIniciais['uf_fiscal'] ?? '';
-    _grupoCtrl.text = widget.dadosIniciais['grupo_economico'] ?? '';
-    _compradorCtrl.text = widget.dadosIniciais['contato_comprador'] ?? '';
-    _whatsCtrl.text = widget.dadosIniciais['whatsapp'] ?? '';
-    _emailCtrl.text = widget.dadosIniciais['email_nfe'] ?? '';
+    final dados = widget.dadosIniciais;
+
+    _isAtivo = dados['ativo'] ?? true;
+
+    // =========================================================================
+    // MAPEAMENTO EXATO CONFORME ESTRUTURA OFICIAL DO FIREBASE
+    // =========================================================================
+    _razaoCtrl = TextEditingController(text: dados['razao_social'] ?? '');
+    _fantasiaCtrl = TextEditingController(text: dados['nome_fantasia'] ?? '');
+    _cnpjCtrl = TextEditingController(text: dados['cnpj'] ?? '');
+    _ieCtrl = TextEditingController(text: dados['ie'] ?? '');
+    _cepCtrl = TextEditingController(text: (dados['cep'] ?? '').toString());
+    _ruaCtrl = TextEditingController(text: dados['logradouro'] ?? '');
+    _numCtrl = TextEditingController(text: (dados['numero'] ?? '').toString());
+    _bairroCtrl = TextEditingController(text: dados['bairro'] ?? '');
+    _cidadeCtrl = TextEditingController(text: dados['cidade'] ?? '');
+    _ufCtrl = TextEditingController(text: dados['estado'] ?? '');
+    _grupoCtrl = TextEditingController(text: dados['grupo_economico'] ?? '');
+    _compradorCtrl = TextEditingController(
+      text: dados['contato_comprador'] ?? '',
+    );
+
+    _whatsCtrl = TextEditingController(text: dados['whatsapp'] ?? '');
+    _telefoneFixoCtrl = TextEditingController(
+      text: dados['telefone_fixo'] ?? '',
+    ); // LENDO O FIXO
+    _emailCtrl = TextEditingController(text: dados['email'] ?? '');
+  }
+
+  @override
+  void dispose() {
+    _razaoCtrl.dispose();
+    _fantasiaCtrl.dispose();
+    _cnpjCtrl.dispose();
+    _ieCtrl.dispose();
+    _cepCtrl.dispose();
+    _ruaCtrl.dispose();
+    _numCtrl.dispose();
+    _bairroCtrl.dispose();
+    _cidadeCtrl.dispose();
+    _ufCtrl.dispose();
+    _grupoCtrl.dispose();
+    _compradorCtrl.dispose();
+    _whatsCtrl.dispose();
+    _telefoneFixoCtrl.dispose(); // LIMPANDO O FIXO DA MEMÓRIA
+    _emailCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _salvarEdicaoCompleta() async {
@@ -67,17 +103,18 @@ class _TelaEdicaoClienteCompletaState extends State<TelaEdicaoClienteCompleta> {
             'ativo': _isAtivo,
             'razao_social': _razaoCtrl.text.toUpperCase(),
             'nome_fantasia': _fantasiaCtrl.text.toUpperCase(),
-            'inscricao_estadual': _ieCtrl.text,
-            'cep_fiscal': _cepCtrl.text,
-            'rua_fiscal': _ruaCtrl.text,
-            'num_fiscal': _numCtrl.text,
-            'bairro_fiscal': _bairroCtrl.text,
-            'cidade_fiscal': _cidadeCtrl.text,
-            'uf_fiscal': _ufCtrl.text,
+            'ie': _ieCtrl.text,
+            'cep': _cepCtrl.text,
+            'logradouro': _ruaCtrl.text,
+            'numero': _numCtrl.text,
+            'bairro': _bairroCtrl.text,
+            'cidade': _cidadeCtrl.text.toUpperCase().trim(),
+            'estado': _ufCtrl.text.toUpperCase().trim(),
             'grupo_economico': _grupoCtrl.text,
             'contato_comprador': _compradorCtrl.text,
             'whatsapp': _whatsCtrl.text,
-            'email_nfe': _emailCtrl.text,
+            'telefone_fixo': _telefoneFixoCtrl.text, // SALVANDO NO BD
+            'email': _emailCtrl.text,
           });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -210,6 +247,10 @@ class _TelaEdicaoClienteCompletaState extends State<TelaEdicaoClienteCompleta> {
                       ),
                     ),
                     const SizedBox(height: 12),
+
+                    // =========================================================
+                    // WHATSAPP E TELEFONE FIXO LADO A LADO
+                    // =========================================================
                     Row(
                       children: [
                         Expanded(
@@ -224,18 +265,31 @@ class _TelaEdicaoClienteCompletaState extends State<TelaEdicaoClienteCompleta> {
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          flex: 2,
                           child: TextFormField(
-                            controller: _emailCtrl,
+                            controller: _telefoneFixoCtrl,
                             decoration: const InputDecoration(
-                              labelText: 'E-mail',
+                              labelText: 'Telefone Fixo',
                               border: OutlineInputBorder(),
                             ),
-                            keyboardType: TextInputType.emailAddress,
+                            keyboardType: TextInputType.phone,
                           ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 12),
+
+                    // =========================================================
+                    // E-MAIL OCUPANDO A LINHA INTEIRA PARA NÃO CORTAR TEXTO
+                    // =========================================================
+                    TextFormField(
+                      controller: _emailCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'E-mail',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.emailAddress,
+                    ),
+
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _grupoCtrl,

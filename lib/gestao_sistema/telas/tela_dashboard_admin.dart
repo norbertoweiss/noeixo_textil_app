@@ -361,7 +361,7 @@ class _TelaDashboardAdminState extends State<TelaDashboardAdmin> {
   void _abrirGestaoModulos(String id, Map<String, dynamic> data) {
     List modulosAtuais = data['modulos_ativos'] ?? [];
 
-    // Todos os módulos possíveis no sistema
+    // Todos os módulos possíveis no sistema (Atualizado com Logística)
     final List<String> todosModulos = [
       'Dashboard',
       'Suprimentos',
@@ -369,6 +369,7 @@ class _TelaDashboardAdminState extends State<TelaDashboardAdmin> {
       'Engenharia',
       'PCP',
       'Produção',
+      'Logística', // <-- MÓDULO INJETADO AQUI
       'Financeiro',
       'RH',
     ];

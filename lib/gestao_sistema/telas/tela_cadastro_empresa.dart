@@ -34,6 +34,7 @@ class _TelaCadastroEmpresaState extends State<TelaCadastroEmpresa> {
     'Engenharia': false,
     'PCP': false,
     'Produção': false,
+    'Logística': false,
     'Financeiro': false,
     'RH': false,
   };

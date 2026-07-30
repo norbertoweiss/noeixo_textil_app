@@ -2,10 +2,13 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
+import 'form_pedido_venda.dart';
 
 class TelaMeusPedidos extends StatefulWidget {
   const TelaMeusPedidos({super.key});
@@ -17,21 +20,71 @@ class TelaMeusPedidos extends StatefulWidget {
 class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
   String _statusFiltro = 'Todos';
 
-  // Variáveis para os novos filtros
   String _termoBuscaCliente = '';
   final TextEditingController _buscaCtrl = TextEditingController();
   DateTime? _dataInicial;
   DateTime? _dataFinal;
 
-  // Variáveis para o motor de PDF
   pw.Font? _fonteNormal;
   pw.Font? _fonteNegrito;
   bool _carregandoFontes = true;
+
+  String _nomeVendedorLogado = '';
+  bool _isAdmin = false;
 
   @override
   void initState() {
     super.initState();
     _carregarFontesNaMemoria();
+    _identificarVendedorLogado();
+  }
+
+  Future<void> _identificarVendedorLogado() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null && user.email != null) {
+        final email = user.email!;
+
+        if (email == 'admin@noeixo.com.br' ||
+            email == 'diretoria@noeixo.com.br') {
+          if (mounted) setState(() => _isAdmin = true);
+          return;
+        }
+
+        final queryVendedores = await FirebaseFirestore.instance
+            .collection('vendedores')
+            .where('email', isEqualTo: email)
+            .limit(1)
+            .get();
+
+        if (queryVendedores.docs.isNotEmpty) {
+          final data = queryVendedores.docs.first.data();
+          if (data.containsKey('nome_vendedor') &&
+              data['nome_vendedor'] != null) {
+            if (mounted)
+              setState(() => _nomeVendedorLogado = data['nome_vendedor']);
+            return;
+          } else if (data.containsKey('nome') && data['nome'] != null) {
+            if (mounted) setState(() => _nomeVendedorLogado = data['nome']);
+            return;
+          }
+        }
+
+        final docUsuario = await FirebaseFirestore.instance
+            .collection('usuarios')
+            .doc(email)
+            .get();
+
+        if (docUsuario.exists && docUsuario.data() != null) {
+          final data = docUsuario.data()!;
+          if (data.containsKey('nome') && data['nome'] != null) {
+            if (mounted) setState(() => _nomeVendedorLogado = data['nome']);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao identificar vendedor logado: $e');
+    }
   }
 
   Future<void> _carregarFontesNaMemoria() async {
@@ -79,25 +132,54 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
     }
   }
 
+  // =========================================================================
+  // ATUALIZAÇÃO: CORES E ÍCONES PARA O NOVO STATUS
+  // =========================================================================
   Color _obterCorStatus(String status) {
-    if (status.contains('ABERTO')) return Colors.green;
-    if (status.contains('ANÁLISE')) return Colors.deepPurple;
-    if (status.contains('FATURADO')) return Colors.blue;
-    if (status.contains('CANCELADO')) return Colors.red;
-    return Colors.grey;
+    switch (status) {
+      case 'Aberto':
+        return Colors.blue.shade700;
+      case 'Em Análise':
+        return Colors.amber.shade700;
+      case 'Devolvido':
+      case 'Devolvido pelo Cliente':
+        return Colors.red.shade700;
+      case 'Aprovado':
+        return Colors.teal;
+      case 'Pendente Cliente':
+        return Colors.orange;
+      case 'Faturado':
+        return Colors.green.shade700;
+      case 'Cancelado':
+        return Colors.grey.shade800;
+      default:
+        return Colors.blueGrey;
+    }
   }
 
   IconData _obterIconeStatus(String status) {
-    if (status.contains('ABERTO')) return Icons.check_circle_outline;
-    if (status.contains('ANÁLISE')) return Icons.gavel;
-    if (status.contains('FATURADO')) return Icons.local_shipping;
-    if (status.contains('CANCELADO')) return Icons.cancel;
-    return Icons.info_outline;
+    switch (status) {
+      case 'Aberto':
+        return Icons.inbox;
+      case 'Em Análise':
+        return Icons.hourglass_top;
+      case 'Devolvido':
+        return Icons.warning_amber_rounded;
+      case 'Devolvido pelo Cliente':
+        return Icons.assignment_return;
+      case 'Aprovado':
+        return Icons.verified;
+      case 'Pendente Cliente':
+        return Icons.support_agent;
+      case 'Faturado':
+        return Icons.local_shipping;
+      case 'Cancelado':
+        return Icons.cancel;
+      default:
+        return Icons.info_outline;
+    }
   }
 
-  // =========================================================================
-  // APROVAÇÃO MANUAL DO VENDEDOR (DESTRAVA O PEDIDO)
-  // =========================================================================
   Future<void> _aprovarManualmente(String pedidoId) async {
     bool confirmar =
         await showDialog(
@@ -105,7 +187,7 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
           builder: (context) => AlertDialog(
             title: const Text('Forçar Aprovação'),
             content: const Text(
-              'O cliente autorizou o pedido verbalmente/pelo WhatsApp? Ao confirmar, o pedido descerá para a fábrica.',
+              'O cliente autorizou o pedido verbalmente/pelo WhatsApp? Ao confirmar, o pedido entrará no fluxo comercial.',
             ),
             actions: [
               TextButton(
@@ -131,38 +213,33 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
             .collection('pedidos_venda')
             .doc(pedidoId)
             .update({
-              'status': 'ABERTO',
+              'status': 'Aberto',
+              'status_comercial': 'Aberto',
               'dataAprovacaoVendedor': FieldValue.serverTimestamp(),
               'obsAprovacao': 'Aprovado manualmente pelo representante.',
             });
-        if (mounted) {
+        if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Pedido aprovado e enviado para produção!'),
+              content: Text('Pedido aprovado com sucesso!'),
               backgroundColor: Colors.green,
             ),
           );
-        }
       } catch (e) {
-        if (mounted) {
+        if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Erro ao aprovar: $e'),
               backgroundColor: Colors.red,
             ),
           );
-        }
       }
     }
   }
 
-  // =========================================================================
-  // GERAÇÃO DE PDF PARA VISUALIZAÇÃO DIRETA
-  // =========================================================================
   Future<Uint8List> _gerarPdf(Map<String, dynamic> dados) async {
     final pdf = pw.Document();
     final List itens = dados['itens'] ?? [];
-
     final corSucesso = PdfColors.green;
     final corAlerta = PdfColors.purple;
     final corTabela = PdfColors.teal;
@@ -197,9 +274,11 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Text(
-                      'Status: ${dados['status']}',
+                      'Status: ${dados['status_comercial'] ?? dados['status'] ?? 'Aberto'}',
                       style: pw.TextStyle(
-                        color: dados['status'] == 'ABERTO'
+                        color:
+                            (dados['status_comercial'] == 'Aberto' ||
+                                dados['status'] == 'ABERTO')
                             ? corSucesso
                             : corAlerta,
                         fontWeight: pw.FontWeight.bold,
@@ -288,7 +367,6 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                         );
                       }).toList(),
                 ),
-
                 ...itens.map((item) {
                   List grade = item['gradeDistribuicao'] ?? [];
                   Map<String, List<String>> gradeAgrupada = {};
@@ -312,15 +390,14 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                       item['fotoBase64'].toString().isNotEmpty) {
                     try {
                       final imageBytes = base64Decode(item['fotoBase64']);
-                      final memoryImage = pw.MemoryImage(imageBytes);
                       widgetFoto = pw.Image(
-                        memoryImage,
+                        pw.MemoryImage(imageBytes),
                         width: 35,
                         height: 35,
                         fit: pw.BoxFit.cover,
                       );
                     } catch (e) {
-                      // Silencioso se falhar
+                      /* Silencioso */
                     }
                   }
 
@@ -379,10 +456,8 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                 }).toList(),
               ],
             ),
-
             pw.SizedBox(height: 20),
             pw.Divider(),
-
             pw.Container(
               alignment: pw.Alignment.centerRight,
               child: pw.Column(
@@ -408,7 +483,6 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
         },
       ),
     );
-
     return pdf.save();
   }
 
@@ -428,6 +502,10 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
 
   @override
   Widget build(BuildContext context) {
+    Query queryPedidos = FirebaseFirestore.instance
+        .collection('pedidos_venda')
+        .orderBy('dataPedido', descending: true);
+
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
       appBar: AppBar(
@@ -440,16 +518,12 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
       ),
       body: Column(
         children: [
-          // ========================================================
-          // PAINEL DE FILTROS SUPERIOR (NOVO)
-          // ========================================================
           Container(
             padding: const EdgeInsets.all(16),
             color: Colors.white,
             width: double.infinity,
             child: Column(
               children: [
-                // Busca por nome
                 TextField(
                   controller: _buscaCtrl,
                   decoration: InputDecoration(
@@ -464,8 +538,6 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                       setState(() => _termoBuscaCliente = val.toLowerCase()),
                 ),
                 const SizedBox(height: 12),
-
-                // Filtro de Data
                 Row(
                   children: [
                     Expanded(
@@ -527,30 +599,24 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                 ),
                 const SizedBox(height: 12),
 
-                // Filtro de Status
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children:
                         [
                           'Todos',
-                          'AGUARDANDO APROVAÇÃO DO CLIENTE',
-                          'ABERTO',
-                          'SOB ANÁLISE (DIRETORIA)',
-                          'FATURADO',
+                          'Pendente Cliente',
+                          'Aberto',
+                          'Em Análise',
+                          'Devolvido',
+                          'Aprovado',
                         ].map((status) {
                           bool selecionado = _statusFiltro == status;
-                          String labelDisplay = status;
-                          if (status == 'SOB ANÁLISE (DIRETORIA)')
-                            labelDisplay = 'Em Análise';
-                          if (status == 'AGUARDANDO APROVAÇÃO DO CLIENTE')
-                            labelDisplay = 'Pendente Cliente';
-
                           return Padding(
                             padding: const EdgeInsets.only(right: 8.0),
                             child: ChoiceChip(
                               label: Text(
-                                labelDisplay,
+                                status,
                                 style: TextStyle(
                                   color: selecionado
                                       ? Colors.white
@@ -561,11 +627,10 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                                 ),
                               ),
                               selected: selecionado,
-                              selectedColor: Colors.indigo,
+                              selectedColor: _obterCorStatus(status),
                               backgroundColor: Colors.grey.shade200,
-                              onSelected: (bool valor) {
-                                setState(() => _statusFiltro = status);
-                              },
+                              onSelected: (bool valor) =>
+                                  setState(() => _statusFiltro = status),
                             ),
                           );
                         }).toList(),
@@ -577,53 +642,62 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
 
           const Divider(height: 1, thickness: 1),
 
-          // ========================================================
-          // LISTA DE PEDIDOS EM TEMPO REAL
-          // ========================================================
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('pedidos_venda')
-                  .orderBy('dataPedido', descending: true)
-                  .snapshots(),
+              stream: queryPedidos.snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return const Center(
-                    child: Text('Erro ao carregar os pedidos.'),
+                    child: Text(
+                      'Erro ao carregar os pedidos. Verifique a conexão.',
+                    ),
                   );
                 }
-                if (snapshot.connectionState == ConnectionState.waiting) {
+                if (snapshot.connectionState == ConnectionState.waiting)
                   return const Center(child: CircularProgressIndicator());
-                }
 
                 var documentos = snapshot.data!.docs;
 
-                // FILTRAGEM NA MEMÓRIA
                 var listaFiltrada = documentos.where((doc) {
                   var data = doc.data() as Map<String, dynamic>;
-                  var status = data['status'] ?? 'ABERTO';
+
+                  if (!_isAdmin && _nomeVendedorLogado.isNotEmpty) {
+                    String vendedorDoPedido = data['representanteNome'] ?? '';
+                    if (vendedorDoPedido != _nomeVendedorLogado) return false;
+                  }
+
+                  String statusCru =
+                      data['status_comercial'] ?? data['status'] ?? 'Aberto';
+                  String statusMapeado = statusCru;
+                  if (statusCru == 'SOB ANÁLISE (DIRETORIA)')
+                    statusMapeado = 'Em Análise';
+                  if (statusCru == 'AGUARDANDO APROVAÇÃO DO CLIENTE')
+                    statusMapeado = 'Pendente Cliente';
+                  if (statusCru == 'ABERTO') statusMapeado = 'Aberto';
+
+                  // ==============================================================
+                  // MAPEAR PARA O FILTRO 'Devolvido' ABRANGER O CLIENTE
+                  // ==============================================================
+                  if (statusCru == 'Devolvido pelo Cliente')
+                    statusMapeado = 'Devolvido';
+
+                  if (_statusFiltro != 'Todos' &&
+                      statusMapeado != _statusFiltro)
+                    return false;
+
                   var clienteNome = (data['clienteNome'] ?? '')
                       .toString()
                       .toLowerCase();
-
-                  Timestamp? ts = data['dataPedido'] as Timestamp?;
-                  DateTime? dataPedido = ts?.toDate();
-
-                  // Filtro Status
-                  if (_statusFiltro != 'Todos' && status != _statusFiltro)
-                    return false;
-
-                  // Filtro Texto
                   if (_termoBuscaCliente.isNotEmpty &&
                       !clienteNome.contains(_termoBuscaCliente))
                     return false;
 
-                  // Filtro Data
+                  Timestamp? ts = data['dataPedido'] as Timestamp?;
+                  DateTime? dataPedido = ts?.toDate();
                   if (dataPedido != null) {
                     if (_dataInicial != null &&
                         dataPedido.isBefore(_dataInicial!))
                       return false;
-                    // Adiciona 1 dia na data final para incluir todo o dia selecionado até 23:59
                     if (_dataFinal != null &&
                         dataPedido.isAfter(
                           _dataFinal!.add(const Duration(days: 1)),
@@ -663,7 +737,6 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
 
                     final String cliente =
                         data['clienteNome'] ?? 'Cliente não informado';
-                    final String status = data['status'] ?? 'ABERTO';
                     final String tipoVenda = data['tipoVenda'] ?? '-';
                     final double valorFinal = (data['valorFinalCobrado'] ?? 0)
                         .toDouble();
@@ -672,29 +745,58 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                     final int totalItens =
                         (data['itens'] as List?)?.length ?? 0;
 
-                    Color corStatus = _obterCorStatus(status);
+                    String statusExibicao =
+                        data['status_comercial'] ?? data['status'] ?? 'Aberto';
+                    if (statusExibicao == 'SOB ANÁLISE (DIRETORIA)')
+                      statusExibicao = 'Em Análise';
+                    if (statusExibicao == 'AGUARDANDO APROVAÇÃO DO CLIENTE')
+                      statusExibicao = 'Pendente Cliente';
+                    if (statusExibicao == 'ABERTO') statusExibicao = 'Aberto';
+
+                    Color corStatus = _obterCorStatus(statusExibicao);
+
+                    // =========================================================
+                    // ATUALIZAÇÃO: PERMITE PUXAR MENSAGEM DO CLIENTE TAMBÉM
+                    // =========================================================
+                    String msgDevolucao = '';
+                    if (statusExibicao == 'Devolvido' ||
+                        statusExibicao == 'Devolvido pelo Cliente') {
+                      List historico = data['historico_mensagens'] ?? [];
+                      if (historico.isNotEmpty) {
+                        msgDevolucao =
+                            historico.last['mensagem'] ??
+                            'Devolvido sem justificativa em texto.';
+                      }
+                    }
 
                     return Card(
-                      elevation: 2,
+                      elevation:
+                          (statusExibicao == 'Devolvido' ||
+                              statusExibicao == 'Devolvido pelo Cliente')
+                          ? 4
+                          : 2,
                       margin: const EdgeInsets.only(bottom: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                         side: BorderSide(
-                          color: corStatus.withOpacity(0.3),
-                          width: 1,
+                          color: corStatus.withOpacity(0.5),
+                          width:
+                              (statusExibicao == 'Devolvido' ||
+                                  statusExibicao == 'Devolvido pelo Cliente')
+                              ? 2
+                              : 1,
                         ),
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // TOPO DO CARD
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
                               vertical: 8,
                             ),
-                            color: corStatus.withOpacity(0.1),
+                            color: corStatus.withOpacity(0.15),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
@@ -702,18 +804,18 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                                   child: Row(
                                     children: [
                                       Icon(
-                                        _obterIconeStatus(status),
+                                        _obterIconeStatus(statusExibicao),
                                         color: corStatus,
-                                        size: 16,
+                                        size: 18,
                                       ),
                                       const SizedBox(width: 6),
                                       Expanded(
                                         child: Text(
-                                          status,
+                                          statusExibicao.toUpperCase(),
                                           style: TextStyle(
                                             color: corStatus,
                                             fontWeight: FontWeight.bold,
-                                            fontSize: 11,
+                                            fontSize: 12,
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -724,15 +826,15 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                                 Text(
                                   _formatarDataHora(dataPedidoTs),
                                   style: const TextStyle(
-                                    color: Colors.grey,
+                                    color: Colors.blueGrey,
                                     fontSize: 11,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ],
                             ),
                           ),
 
-                          // CORPO DO CARD
                           Padding(
                             padding: const EdgeInsets.all(16),
                             child: Row(
@@ -792,11 +894,56 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                             ),
                           ),
 
+                          // =========================================================
+                          // TARJA VERMELHA QUE MOSTRA A MENSAGEM
+                          // =========================================================
+                          if ((statusExibicao == 'Devolvido' ||
+                                  statusExibicao == 'Devolvido pelo Cliente') &&
+                              msgDevolucao.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              color: Colors.red.shade50,
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.feedback,
+                                    color: Colors.red,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          statusExibicao ==
+                                                  'Devolvido pelo Cliente'
+                                              ? 'Instrução do Cliente:'
+                                              : 'Instrução de Correção (Gestor):',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.red,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        Text(
+                                          msgDevolucao,
+                                          style: const TextStyle(
+                                            color: Colors.red,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
                           const Divider(height: 1),
 
-                          // ========================================================
-                          // AÇÕES DO CARTÃO (VISUALIZAR PDF E APROVAÇÃO MANUAL)
-                          // ========================================================
                           Container(
                             color: Colors.grey.shade50,
                             padding: const EdgeInsets.symmetric(
@@ -809,17 +956,20 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                                 TextButton.icon(
                                   icon: const Icon(
                                     Icons.picture_as_pdf,
-                                    color: Colors.red,
+                                    color: Colors.blueGrey,
                                   ),
                                   label: const Text(
                                     'Ver PDF',
-                                    style: TextStyle(color: Colors.red),
+                                    style: TextStyle(
+                                      color: Colors.blueGrey,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                   onPressed: () => _abrirVisualizadorPDF(data),
                                 ),
-                                if (status ==
-                                    'AGUARDANDO APROVAÇÃO DO CLIENTE') ...[
-                                  const SizedBox(width: 12),
+
+                                if (statusExibicao == 'Pendente Cliente') ...[
+                                  const SizedBox(width: 8),
                                   ElevatedButton.icon(
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.green,
@@ -839,6 +989,56 @@ class _TelaMeusPedidosState extends State<TelaMeusPedidos> {
                                     ),
                                     onPressed: () =>
                                         _aprovarManualmente(doc.id),
+                                  ),
+                                ],
+
+                                // =========================================================
+                                // BOTÃO AJUSTAR PEDIDO: LIBERADO PARA O CLIENTE TAMBÉM
+                                // =========================================================
+                                if (statusExibicao == 'Devolvido' ||
+                                    statusExibicao ==
+                                        'Devolvido pelo Cliente') ...[
+                                  const SizedBox(width: 8),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange.shade800,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
+                                      ),
+                                    ),
+                                    icon: const Icon(Icons.edit, size: 16),
+                                    label: const Text(
+                                      'Ajustar Pedido',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => FormPedidoVenda(
+                                            empresaId:
+                                                data['empresa_id'] ??
+                                                'teste_textil',
+                                            clienteId:
+                                                data['clienteId'] ??
+                                                'ID_NAO_ENCONTRADO',
+                                            clienteNome: cliente,
+                                            regiao:
+                                                data['regiao'] ??
+                                                'Não Informada',
+                                            whatsappCliente:
+                                                data['whatsapp'] ?? '',
+                                            pedidoEdicaoId: doc.id,
+                                            dadosEdicao: data,
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ],
                               ],

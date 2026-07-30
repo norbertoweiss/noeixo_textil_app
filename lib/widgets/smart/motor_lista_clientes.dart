@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../forms/form_ficha_cliente.dart';
 
-// O Super Motor agora aceita injetar qualquer modelo de Cartão!
 typedef CartaoBuilder =
     Widget Function(
       BuildContext context,
@@ -15,13 +14,10 @@ class MotorListaClientes extends StatelessWidget {
   final String termoBusca;
   final String filtroAtivo;
   final String filtroStatus;
-  final String filtroRepresentante;
+  final List<String> filtroRepresentantes;
 
-  // Filtros Geográficos Opcionais (se a tela não passar, ele ignora)
   final String filtroUf;
   final List<String> filtrosCidades;
-
-  // Permite que a tela injete o layout do cartão. Se for nulo, usa o padrão administrativo.
   final CartaoBuilder? cartaoCustomizado;
 
   const MotorListaClientes({
@@ -30,7 +26,7 @@ class MotorListaClientes extends StatelessWidget {
     required this.termoBusca,
     required this.filtroAtivo,
     required this.filtroStatus,
-    required this.filtroRepresentante,
+    required this.filtroRepresentantes,
     this.filtroUf = 'Todas',
     this.filtrosCidades = const [],
     this.cartaoCustomizado,
@@ -41,10 +37,6 @@ class MotorListaClientes extends StatelessWidget {
     Query<Map<String, dynamic>> query = FirebaseFirestore.instance
         .collection('clientes')
         .where('empresa_id', isEqualTo: empresaId);
-
-    if (filtroRepresentante != 'Todos') {
-      query = query.where('representante_id', isEqualTo: filtroRepresentante);
-    }
 
     return StreamBuilder<QuerySnapshot>(
       stream: query.snapshots(),
@@ -76,7 +68,6 @@ class MotorListaClientes extends StatelessWidget {
           String cnpj = (data['cnpj'] ?? '').toString();
           String ie = (data['ie'] ?? '').toString().toLowerCase();
 
-          // Leitura Elástica Geográfica (A "fonte da verdade")
           String ufCliente =
               (data['estado'] ?? data['uf_fiscal'] ?? data['uf'] ?? '')
                   .toString()
@@ -100,23 +91,31 @@ class MotorListaClientes extends StatelessWidget {
           bool isRascunho = data['is_rascunho'] ?? false;
           bool isAtivo = data['ativo'] ?? true;
 
-          // Filtro Ativo/Inativo
+          // UNIFICAÇÃO DO BOLSÃO
+          String repAtual = (data['representante_id'] ?? 'BOLSÃO').toString();
+          if (repAtual == 'Lista Clientes Importada' ||
+              repAtual.trim().isEmpty) {
+            repAtual = 'BOLSÃO';
+          }
+
+          if (filtroRepresentantes.isNotEmpty &&
+              !filtroRepresentantes.contains(repAtual)) {
+            return false;
+          }
+
           if (filtroAtivo == 'Ativos' && !isAtivo) return false;
           if (filtroAtivo == 'Inativos' && isAtivo) return false;
 
-          // Filtro Status
           if (filtroStatus == 'Rascunho' && !isRascunho) return false;
           if (filtroStatus != 'Todos' && filtroStatus != 'Rascunho') {
             if (isRascunho || statusCreditoUI != filtroStatus) return false;
           }
 
-          // Filtros Geográficos
           if (filtroUf != 'Todas' && ufCliente != filtroUf) return false;
           if (filtrosCidades.isNotEmpty &&
               !filtrosCidades.contains(cidadeCliente))
             return false;
 
-          // Filtro de Busca (Texto)
           if (termoBusca.isNotEmpty) {
             String busca = termoBusca.toLowerCase();
             if (!razao.contains(busca) &&
@@ -130,7 +129,6 @@ class MotorListaClientes extends StatelessWidget {
           return true;
         }).toList();
 
-        // ORDENAÇÃO TRIPLA: 1º UF, 2º Cidade, 3º Razão Social
         docsFiltrados.sort((a, b) {
           var dataA = a.data() as Map<String, dynamic>;
           var dataB = b.data() as Map<String, dynamic>;
@@ -175,7 +173,7 @@ class MotorListaClientes extends StatelessWidget {
         if (docsFiltrados.isEmpty) {
           return const Center(
             child: Text(
-              'Nenhum cliente encontrado com estes filtros.',
+              'Nenhum cliente atende aos filtros atuais.',
               style: TextStyle(color: Colors.grey, fontSize: 16),
             ),
           );
@@ -188,14 +186,10 @@ class MotorListaClientes extends StatelessWidget {
             var doc = docsFiltrados[index];
             var data = doc.data() as Map<String, dynamic>;
 
-            // Se a tela passou um layout customizado (como o CardClienteRota), usa ele!
             if (cartaoCustomizado != null) {
               return cartaoCustomizado!(context, doc, data);
             }
 
-            // ================================================================
-            // CASO CONTRÁRIO, RENDERIZA O CARTÃO ADMINISTRATIVO PADRÃO
-            // ================================================================
             String textoIE =
                 data['ie'] != null && data['ie'].toString().trim().isNotEmpty
                 ? '  |  IE: ${data['ie']}'

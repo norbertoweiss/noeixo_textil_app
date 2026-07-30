@@ -4,78 +4,102 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class TelaCatalogoVendas extends StatefulWidget {
   final String empresaId;
+  final Map<String, dynamic>? itemParaEditar;
 
-  const TelaCatalogoVendas({super.key, required this.empresaId});
+  // =======================================================
+  // NOVO: RECEBE A LISTA DO CARRINHO PARA TRAVAR O CLIQUE
+  // =======================================================
+  final List<String> produtosNoCarrinho;
+
+  const TelaCatalogoVendas({
+    super.key,
+    required this.empresaId,
+    this.itemParaEditar,
+    this.produtosNoCarrinho = const [], // Vazio por padrão
+  });
 
   @override
   State<TelaCatalogoVendas> createState() => _TelaCatalogoVendasState();
 }
 
 class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
+  static double _lastScrollOffset = 0.0;
+  static String _lastCategoria = 'Todos';
+  static String _lastTermoBusca = '';
+
+  late ScrollController _scrollController;
+
   String _termoBusca = '';
   String _categoriaSelecionada = 'Todos';
 
-  // Variáveis para a Gestão Dinâmica de Preços no Catálogo
   bool _isLoadingTabelas = true;
   List<Map<String, dynamic>> _tabelasDisponiveis = [];
   String? _tabelaAtivaId;
   Map<String, double> _precosDaTabelaAtiva = {};
 
-  // --- CACHE DAS FICHAS TÉCNICAS E CORES ---
   bool _isLoadingFichas = true;
   bool _isLoadingCores = true;
   Map<String, Map<String, dynamic>> _fichasCache = {};
   Map<String, String> _coresImagensCache = {};
 
+  bool _modalEdicaoAberto = false;
+
   @override
   void initState() {
     super.initState();
+    _termoBusca = _lastTermoBusca;
+    _categoriaSelecionada = _lastCategoria;
+    _scrollController = ScrollController(
+      initialScrollOffset: _lastScrollOffset,
+    );
+
+    _scrollController.addListener(() {
+      _lastScrollOffset = _scrollController.offset;
+    });
+
     _carregarTabelasDePreco();
     _carregarFichasTecnicas();
     _carregarCoresCache();
   }
 
-  // =========================================================================
-  // CARREGA AS TABELAS QUE O VENDEDOR PODE USAR
-  // =========================================================================
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   Future<void> _carregarTabelasDePreco() async {
     try {
       final tabelasSnap = await FirebaseFirestore.instance
           .collection('tabelas_preco')
           .where('empresa_id', isEqualTo: widget.empresaId)
           .get();
-
       List<Map<String, dynamic>> lista = [];
       for (var doc in tabelasSnap.docs) {
         bool isAtiva = doc.data().containsKey('ativa')
             ? doc.data()['ativa']
             : true;
-        if (isAtiva) {
+        if (isAtiva)
           lista.add({
             'id': doc.id,
             'nome': doc.data()['nome'] ?? 'Tabela sem nome',
           });
-        }
       }
-
       if (lista.isNotEmpty) {
         String tabelaInicial = lista.first['id'];
         for (var t in lista) {
           if (t['id'] == 'tabela_padrao') tabelaInicial = t['id'];
         }
-
         setState(() {
           _tabelasDisponiveis = lista;
           _tabelaAtivaId = tabelaInicial;
           _isLoadingTabelas = false;
         });
-
         await _buscarPrecosDaTabela(_tabelaAtivaId!);
       } else {
         setState(() => _isLoadingTabelas = false);
       }
     } catch (e) {
-      debugPrint("Erro ao carregar tabelas: $e");
       setState(() => _isLoadingTabelas = false);
     }
   }
@@ -87,17 +111,13 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
           .doc(tabelaId)
           .collection('itens')
           .get();
-
       Map<String, double> precosTemp = {};
       for (var doc in itensSnap.docs) {
         precosTemp[doc.id] =
             double.tryParse(doc.data()['preco']?.toString() ?? '0') ?? 0.0;
       }
-
       setState(() => _precosDaTabelaAtiva = precosTemp);
-    } catch (e) {
-      debugPrint("Erro ao carregar itens da tabela: $e");
-    }
+    } catch (e) {}
   }
 
   void _aoTrocarTabela(String novaTabelaId) {
@@ -108,30 +128,22 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
     _buscarPrecosDaTabela(novaTabelaId);
   }
 
-  // =========================================================================
-  // CACHE DAS FICHAS TÉCNICAS E TEXTURAS DAS CORES
-  // =========================================================================
   Future<void> _carregarFichasTecnicas() async {
     try {
       final snap = await FirebaseFirestore.instance
           .collection('fichas_tecnicas')
           .where('empresa_id', isEqualTo: widget.empresaId)
           .get();
-
       Map<String, Map<String, dynamic>> cacheTemp = {};
       for (var doc in snap.docs) {
         var data = doc.data();
-        if (data['produtoId'] != null) {
-          cacheTemp[data['produtoId']] = data;
-        }
+        if (data['produtoId'] != null) cacheTemp[data['produtoId']] = data;
       }
-
       setState(() {
         _fichasCache = cacheTemp;
         _isLoadingFichas = false;
       });
     } catch (e) {
-      debugPrint("Erro ao carregar Fichas: $e");
       setState(() => _isLoadingFichas = false);
     }
   }
@@ -140,7 +152,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
     try {
       final snap = await FirebaseFirestore.instance.collection('cores').get();
       Map<String, String> cacheTemp = {};
-
       for (var doc in snap.docs) {
         var data = doc.data();
         if (data['nome'] != null &&
@@ -149,7 +160,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
           cacheTemp[data['nome'].toString()] = data['imagemBase64'].toString();
         }
       }
-
       if (mounted) {
         setState(() {
           _coresImagensCache = cacheTemp;
@@ -157,24 +167,20 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
         });
       }
     } catch (e) {
-      debugPrint("Erro ao carregar texturas das cores: $e");
       if (mounted) setState(() => _isLoadingCores = false);
     }
   }
 
   String _obterTecidoPrincipal(String produtoId) {
     if (!_fichasCache.containsKey(produtoId)) return '';
-
     List insumos = _fichasCache[produtoId]!['insumos'] ?? [];
     if (insumos.isEmpty) return '';
-
     for (var i in insumos) {
       String nome = (i['insumoNome'] ?? i['nome'] ?? i['descricao'] ?? '')
           .toString();
       String tipo = (i['tipo'] ?? i['categoria'] ?? '')
           .toString()
           .toUpperCase();
-
       if (tipo.contains('TECIDO') ||
           tipo.contains('MALHA') ||
           nome.toUpperCase().contains('MALHA') ||
@@ -184,19 +190,16 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
         return nome;
       }
     }
-
     return (insumos.first['insumoNome'] ?? insumos.first['nome'] ?? '')
         .toString();
   }
 
-  // =========================================================================
-  // MODAL DE LANÇAMENTO
-  // =========================================================================
   void _abrirMatrizLancamento(
     Map<String, dynamic> produto,
     double precoAplicadoTabela,
-    String produtoId,
-  ) {
+    String produtoId, {
+    Map<String, dynamic>? itemEdicao,
+  }) {
     List<String> tamanhos = [];
     List<String> cores = [];
 
@@ -214,12 +217,10 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
     int multiplicadorGrade = 0;
     bool sortidoPorCor = false;
 
-    // --- VARIÁVEIS DA CALCULADORA DE DESCONTO OCULTA ---
-    bool mostrarCalculadoraDesconto = false;
     double precoNegociado = precoAplicadoTabela;
     double percentualDesconto = 0.0;
+    bool mostrarCalculadoraDesconto = false;
 
-    // Deixamos os controladores vazios inicialmente para não forçar o vendedor a apagar
     final TextEditingController percCtrl = TextEditingController();
     final TextEditingController precoCtrl = TextEditingController();
 
@@ -229,10 +230,40 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
         matrizControllers[cor]![tam] = TextEditingController();
       }
     }
-
     Map<String, TextEditingController> sortidoControllers = {};
     for (String tam in tamanhos) {
       sortidoControllers[tam] = TextEditingController();
+    }
+
+    if (itemEdicao != null) {
+      precoNegociado = itemEdicao['precoVendido'] ?? precoAplicadoTabela;
+      percentualDesconto = precoAplicadoTabela > 0
+          ? ((precoAplicadoTabela - precoNegociado) / precoAplicadoTabela) * 100
+          : 0;
+
+      if (percentualDesconto > 0) {
+        mostrarCalculadoraDesconto = true;
+        percCtrl.text = percentualDesconto.toStringAsFixed(1);
+        precoCtrl.text = precoNegociado.toStringAsFixed(2);
+      }
+
+      List gradePre = itemEdicao['gradeDistribuicao'] ?? [];
+      for (var g in gradePre) {
+        String cor = g['cor'];
+        String tam = g['tamanho'];
+        int qtd = g['quantidade'];
+
+        if (cor == 'Sortida') {
+          sortidoPorCor = true;
+          if (sortidoControllers.containsKey(tam))
+            sortidoControllers[tam]!.text = qtd.toString();
+        } else {
+          if (matrizControllers.containsKey(cor) &&
+              matrizControllers[cor]!.containsKey(tam)) {
+            matrizControllers[cor]![tam]!.text = qtd.toString();
+          }
+        }
+      }
     }
 
     showDialog(
@@ -258,19 +289,16 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
               return Colors.deepPurple.shade900;
             }
 
-            // ATUALIZAÇÃO BIDIRECIONAL COM CAMPOS "LIMPOS"
             void aoMudarPercentual(String val) {
               double perc = double.tryParse(val.replaceAll(',', '.')) ?? 0.0;
               if (perc < 0) perc = 0;
               double novoP = precoAplicadoTabela * (1 - (perc / 100));
-
               setModalState(() {
                 percentualDesconto = perc;
                 precoNegociado = novoP;
-                // Atualiza o outro campo apenas se houver valor, senão deixa vazio
-                if (val.isEmpty || perc == 0) {
+                if (val.isEmpty || perc == 0)
                   precoCtrl.text = '';
-                } else {
+                else {
                   String novoPTxt = novoP.toStringAsFixed(2);
                   if (precoCtrl.text != novoPTxt) {
                     precoCtrl.text = novoPTxt;
@@ -289,14 +317,12 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
               double perc =
                   ((precoAplicadoTabela - preco) / precoAplicadoTabela) * 100;
               if (perc < 0) perc = 0;
-
               setModalState(() {
                 precoNegociado = preco;
                 percentualDesconto = perc;
-
-                if (val.isEmpty || preco == precoAplicadoTabela) {
+                if (val.isEmpty || preco == precoAplicadoTabela)
                   percCtrl.text = '';
-                } else {
+                else {
                   String novoPercTxt = perc.toStringAsFixed(1);
                   if (percCtrl.text != novoPercTxt) {
                     percCtrl.text = novoPercTxt;
@@ -331,7 +357,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                 String valorTexto = multiplicadorGrade > 0
                     ? multiplicadorGrade.toString()
                     : '';
-
                 if (sortidoPorCor) {
                   sortidoControllers.forEach(
                     (_, ctrl) => ctrl.text = valorTexto,
@@ -349,7 +374,7 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
               fit: StackFit.expand,
               children: [
                 Container(
-                  color: Colors.grey.shade200,
+                  color: Colors.white,
                   child: InteractiveViewer(
                     panEnabled: true,
                     minScale: 1.0,
@@ -359,7 +384,7 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                             produto['fotoBase64'].toString().isNotEmpty)
                         ? Image.memory(
                             base64Decode(produto['fotoBase64']),
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                           )
                         : const Icon(
                             Icons.inventory,
@@ -405,7 +430,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-
                       const SizedBox(height: 12),
 
                       if (!mostrarCalculadoraDesconto)
@@ -509,8 +533,7 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                       ),
                                       decoration: InputDecoration(
                                         labelText: 'Desconto (%)',
-                                        hintText:
-                                            '0.0', // <-- HINT EXIBIDO QUANDO VAZIO
+                                        hintText: '0.0',
                                         labelStyle: TextStyle(
                                           color: getCorTextoDesconto(),
                                         ),
@@ -558,9 +581,7 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                       decoration: InputDecoration(
                                         labelText: 'Preço Final (R\$)',
                                         hintText: precoAplicadoTabela
-                                            .toStringAsFixed(
-                                              2,
-                                            ), // <-- HINT EXIBIDO QUANDO VAZIO
+                                            .toStringAsFixed(2),
                                         labelStyle: TextStyle(
                                           color: getCorTextoDesconto(),
                                         ),
@@ -823,6 +844,7 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                 ),
                               );
                             }).toList(),
+                          const SizedBox(height: 40),
                         ],
                       ),
                     ),
@@ -878,9 +900,11 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                               ),
                             ),
                             icon: const Icon(Icons.check),
-                            label: const Text(
-                              'Lançar',
-                              style: TextStyle(
+                            label: Text(
+                              itemEdicao != null
+                                  ? 'Atualizar Carrinho'
+                                  : 'Lançar',
+                              style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
                               ),
@@ -929,9 +953,10 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                               }
 
                               Map<String, dynamic> itemParaCarrinho = {
-                                'idTemporario': DateTime.now()
-                                    .millisecondsSinceEpoch
-                                    .toString(),
+                                'idTemporario':
+                                    itemEdicao?['idTemporario'] ??
+                                    DateTime.now().millisecondsSinceEpoch
+                                        .toString(),
                                 'produtoId': produtoId,
                                 'referencia': produto['referencia'] ?? 'S/R',
                                 'nome': produto['nome'] ?? 'Produto',
@@ -956,6 +981,7 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
             );
 
             bool isDesktop = MediaQuery.of(context).size.width > 800;
+            bool tecladoAberto = MediaQuery.of(context).viewInsets.bottom > 0;
 
             return Dialog(
               insetPadding: EdgeInsets.all(isDesktop ? 60 : 16),
@@ -972,8 +998,13 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                     )
                   : Column(
                       children: [
-                        Expanded(flex: 4, child: imagemWidget),
-                        Expanded(flex: 6, child: formularioWidget),
+                        tecladoAberto
+                            ? const SizedBox(height: 0)
+                            : Expanded(flex: 4, child: imagemWidget),
+                        Expanded(
+                          flex: tecladoAberto ? 10 : 6,
+                          child: formularioWidget,
+                        ),
                       ],
                     ),
             );
@@ -985,6 +1016,21 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
 
   @override
   Widget build(BuildContext context) {
+    if (!(_isLoadingTabelas || _isLoadingFichas || _isLoadingCores)) {
+      if (widget.itemParaEditar != null && !_modalEdicaoAberto) {
+        _modalEdicaoAberto = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          double precoTab = widget.itemParaEditar!['precoTabela'] ?? 0.0;
+          _abrirMatrizLancamento(
+            widget.itemParaEditar!,
+            precoTab,
+            widget.itemParaEditar!['produtoId'],
+            itemEdicao: widget.itemParaEditar,
+          );
+        });
+      }
+    }
+
     double larguraTela = MediaQuery.of(context).size.width;
     int numeroColunas = larguraTela > 1200
         ? 5
@@ -1015,6 +1061,10 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                   child: Column(
                     children: [
                       TextField(
+                        controller: TextEditingController(text: _termoBusca)
+                          ..selection = TextSelection.fromPosition(
+                            TextPosition(offset: _termoBusca.length),
+                          ),
                         decoration: InputDecoration(
                           hintText: 'Pesquisar modelo ou referência...',
                           prefixIcon: const Icon(
@@ -1031,8 +1081,10 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                             borderSide: BorderSide.none,
                           ),
                         ),
-                        onChanged: (val) =>
-                            setState(() => _termoBusca = val.toLowerCase()),
+                        onChanged: (val) {
+                          setState(() => _termoBusca = val.toLowerCase());
+                          _lastTermoBusca = _termoBusca;
+                        },
                       ),
                       const SizedBox(height: 12),
                       Row(
@@ -1167,10 +1219,14 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                               ? Colors.teal
                                               : Colors.grey.shade300,
                                         ),
-                                        onSelected: (selecionado) => setState(
-                                          () => _categoriaSelecionada =
-                                              selecionado ? cat : 'Todos',
-                                        ),
+                                        onSelected: (selecionado) {
+                                          setState(
+                                            () => _categoriaSelecionada =
+                                                selecionado ? cat : 'Todos',
+                                          );
+                                          _lastCategoria =
+                                              _categoriaSelecionada;
+                                        },
                                       ),
                                     ),
                                   )
@@ -1183,6 +1239,7 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                     child: Text('Nenhum produto encontrado.'),
                                   )
                                 : GridView.builder(
+                                    controller: _scrollController,
                                     padding: const EdgeInsets.all(8),
                                     gridDelegate:
                                         SliverGridDelegateWithFixedCrossAxisCount(
@@ -1197,7 +1254,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                       final data =
                                           produtosFiltrados[index].data()
                                               as Map<String, dynamic>;
-
                                       double precoFinal =
                                           _precosDaTabelaAtiva[docId] ?? 0.0;
                                       String tecidoInfo = _obterTecidoPrincipal(
@@ -1205,11 +1261,34 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                       );
 
                                       return GestureDetector(
-                                        onTap: () => _abrirMatrizLancamento(
-                                          data,
-                                          precoFinal,
-                                          docId,
-                                        ),
+                                        onTap: () {
+                                          // =======================================================
+                                          // NOVO: BLOQUEADOR IMEDIATO (Evita abrir a tela à toa)
+                                          // =======================================================
+                                          if (widget.produtosNoCarrinho
+                                                  .contains(docId) &&
+                                              widget.itemParaEditar == null) {
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Item já incluso! Para editar, feche o catálogo e clique na peça na lista do carrinho.',
+                                                ),
+                                                backgroundColor: Colors.orange,
+                                                duration: Duration(seconds: 4),
+                                              ),
+                                            );
+                                            return; // Para o fluxo aqui!
+                                          }
+
+                                          // Se não estiver no carrinho, abre a janela normal:
+                                          _abrirMatrizLancamento(
+                                            data,
+                                            precoFinal,
+                                            docId,
+                                          );
+                                        },
                                         child: Card(
                                           elevation: 2,
                                           shape: RoundedRectangleBorder(
@@ -1328,7 +1407,6 @@ class _TelaCatalogoVendasState extends State<TelaCatalogoVendas> {
                                                         color: Colors.blueGrey,
                                                       ),
                                                     ),
-
                                                     if (tecidoInfo.isNotEmpty)
                                                       Padding(
                                                         padding:

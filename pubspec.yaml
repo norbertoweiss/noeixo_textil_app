@@ -75,9 +75,11 @@ flutter:
   # DECLARAÇÃO DE ASSETS E FONTES LOCAIS (OFFLINE)
   assets:
     - assets/icon_noeixo.png
+    # Novo diretório autorizado para ler os polígonos do mapa
+    - assets/mapas/
     - assets/fonts/Roboto-Regular.ttf
     - assets/fonts/Roboto-Bold.ttf
-
+ 
   fonts:
     - family: Roboto
       fonts:

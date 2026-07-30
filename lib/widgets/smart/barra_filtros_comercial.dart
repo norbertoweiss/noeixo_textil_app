@@ -1,39 +1,42 @@
 import 'package:flutter/material.dart';
 
+// IMPORTAÇÃO DO NOSSO NOVO BLOCO DE LEGO
+import 'filtro_vendedor_multi.dart';
+
 class BarraFiltrosComercial extends StatelessWidget {
+  final String empresaId;
   final String termoBusca;
   final String filtroAtivo;
   final String filtroStatus;
-  final String filtroRepresentante;
 
-  // Adicionamos parâmetros opcionais para injetar listas dinâmicas
+  final List<String> filtroRepresentantes;
   final List<String>? opcoesStatus;
-  final List<String>? opcoesRepresentante;
+
+  // NOVA TRAVA DE SEGURANÇA: Controla se o filtro de carteiras aparece na tela
+  final bool exibirFiltroVendedor;
 
   final ValueChanged<String> onBuscaChanged;
   final ValueChanged<String?> onAtivoChanged;
   final ValueChanged<String?> onStatusChanged;
-  final ValueChanged<String?> onRepresentanteChanged;
+  final ValueChanged<List<String>> onRepresentantesChanged;
 
   const BarraFiltrosComercial({
     super.key,
+    required this.empresaId,
     required this.termoBusca,
     required this.filtroAtivo,
     required this.filtroStatus,
-    required this.filtroRepresentante,
+    required this.filtroRepresentantes,
     this.opcoesStatus,
-    this.opcoesRepresentante,
+    this.exibirFiltroVendedor = true, // Por padrão, ele mostra
     required this.onBuscaChanged,
     required this.onAtivoChanged,
     required this.onStatusChanged,
-    required this.onRepresentanteChanged,
+    required this.onRepresentantesChanged,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Se a tela não mandar listas customizadas, ele usa o seu padrão original da Gestão
-    final listaRepresentante =
-        opcoesRepresentante ?? const ['Todos', 'Lista Clientes Importada'];
     final listaStatus =
         opcoesStatus ??
         const ['Todos', 'Pendente Enriquecimento', 'Aprovado', 'Bloqueado'];
@@ -61,18 +64,14 @@ class BarraFiltrosComercial extends StatelessWidget {
 
           Row(
             children: [
-              // Só mostra o filtro de Carteira se houver mais de uma opção
-              if (listaRepresentante.length > 1) ...[
+              // SÓ EXIBE SE A TELA AUTORIZAR (Evita que o vendedor veja carteira alheia)
+              if (exibirFiltroVendedor) ...[
                 Expanded(
                   flex: 2,
-                  child: _construirDropdown(
-                    rotulo: 'Carteira / Vendedor',
-                    valor: filtroRepresentante,
-                    itens: listaRepresentante,
-                    onChanged: onRepresentanteChanged,
-                    destaque:
-                        filtroRepresentante == 'Lista Clientes Importada' ||
-                        filtroRepresentante == 'Base Compartilhada',
+                  child: FiltroVendedorMulti(
+                    empresaId: empresaId,
+                    vendedoresSelecionados: filtroRepresentantes,
+                    onChanged: onRepresentantesChanged,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -83,11 +82,7 @@ class BarraFiltrosComercial extends StatelessWidget {
                 child: _construirDropdown(
                   rotulo: 'Operação',
                   valor: filtroAtivo,
-                  itens: const [
-                    'Ativos',
-                    'Inativos',
-                    'Todos',
-                  ], // Adicionado "Todos" para flexibilidade
+                  itens: const ['Ativos', 'Inativos', 'Todos'],
                   onChanged: onAtivoChanged,
                 ),
               ),
@@ -114,9 +109,7 @@ class BarraFiltrosComercial extends StatelessWidget {
     required String valor,
     required List<String> itens,
     required ValueChanged<String?> onChanged,
-    bool destaque = false,
   }) {
-    // Validação de segurança: se o valor atual não estiver na lista (ex: troca de tela), força para a primeira opção
     final valorSeguro = itens.contains(valor) ? valor : itens.first;
 
     return InputDecorator(
@@ -132,11 +125,7 @@ class BarraFiltrosComercial extends StatelessWidget {
           isExpanded: true,
           value: valorSeguro,
           icon: const Icon(Icons.arrow_drop_down, size: 20),
-          style: TextStyle(
-            color: destaque ? Colors.purple.shade700 : Colors.black87,
-            fontWeight: destaque ? FontWeight.bold : FontWeight.normal,
-            fontSize: 14,
-          ),
+          style: const TextStyle(color: Colors.black87, fontSize: 14),
           items: itens.map((String item) {
             return DropdownMenuItem<String>(
               value: item,

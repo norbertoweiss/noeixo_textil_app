@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:noeixo_textil_app/gestao_sistema/telas/tela_mapa_calor.dart';
 
 import '../../../widgets/smart/motor_indicadores.dart';
 import '../../../widgets/smart/barra_filtros_comercial.dart';
 import '../../../widgets/smart/motor_lista_clientes.dart';
 import '../../../widgets/smart/maquina_importacao_csv.dart';
 import '../../../widgets/forms/form_ficha_cliente.dart';
+
+// Importe a tela do mapa (Se o VS Code sublinhar de vermelho, clique na palavra
 
 class TelaGestaoComercial extends StatefulWidget {
   final String empresaId;
@@ -20,7 +23,9 @@ class _TelaGestaoComercialState extends State<TelaGestaoComercial> {
   String _termoBusca = '';
   String _filtroAtivo = 'Ativos';
   String _filtroStatus = 'Todos';
-  String _filtroRepresentante = 'Lista Clientes Importada';
+
+  // INICIA VAZIO = TODOS (BASE COMPLETA)
+  List<String> _filtroRepresentantes = [];
 
   void _abrirMaquinaImportacao() {
     showDialog(
@@ -138,6 +143,25 @@ class _TelaGestaoComercialState extends State<TelaGestaoComercial> {
             tooltip: 'Importar Planilha de Clientes',
             onPressed: _abrirMaquinaImportacao,
           ),
+          const SizedBox(width: 8),
+
+          // ==========================================
+          // BOTÃO: MAPA DE CALOR (ATUALIZADO)
+          // ==========================================
+          IconButton(
+            icon: const Icon(Icons.map_outlined, color: Colors.orangeAccent),
+            tooltip: 'Mapa de Calor e Expansão',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      TelaMapaCalor(empresaId: widget.empresaId),
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
@@ -147,19 +171,20 @@ class _TelaGestaoComercialState extends State<TelaGestaoComercial> {
             termoBusca: _termoBusca,
             filtroAtivo: _filtroAtivo,
             filtroStatus: _filtroStatus,
-            filtroRepresentante: _filtroRepresentante,
+            filtroRepresentantes: _filtroRepresentantes,
           ),
 
           BarraFiltrosComercial(
+            empresaId: widget.empresaId,
             termoBusca: _termoBusca,
             filtroAtivo: _filtroAtivo,
             filtroStatus: _filtroStatus,
-            filtroRepresentante: _filtroRepresentante,
+            filtroRepresentantes: _filtroRepresentantes,
             onBuscaChanged: (val) => setState(() => _termoBusca = val),
             onAtivoChanged: (val) => setState(() => _filtroAtivo = val!),
             onStatusChanged: (val) => setState(() => _filtroStatus = val!),
-            onRepresentanteChanged: (val) =>
-                setState(() => _filtroRepresentante = val!),
+            onRepresentantesChanged: (val) =>
+                setState(() => _filtroRepresentantes = val),
           ),
 
           Expanded(
@@ -168,7 +193,7 @@ class _TelaGestaoComercialState extends State<TelaGestaoComercial> {
               termoBusca: _termoBusca,
               filtroAtivo: _filtroAtivo,
               filtroStatus: _filtroStatus,
-              filtroRepresentante: _filtroRepresentante,
+              filtroRepresentantes: _filtroRepresentantes,
             ),
           ),
         ],
